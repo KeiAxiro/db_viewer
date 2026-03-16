@@ -26,7 +26,6 @@ if (isset($_GET['action']) && $_GET['action'] === 'get_dbs') {
         $host = $_POST['host'] ?? 'localhost';
         $user = $_POST['user'] ?? 'root';
         $pass = $_POST['pass'] ?? '';
-        
         $tempPdo = new PDO("mysql:host=$host;charset=utf8mb4", $user, $pass);
         $tempPdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
         $dbs = $tempPdo->query("SHOW DATABASES")->fetchAll(PDO::FETCH_COLUMN);
@@ -48,17 +47,20 @@ if (isset($_GET['action']) && $_GET['action'] === 'disconnect') {
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (isset($_POST['connect_mysql'])) {
         $_SESSION['db_connection'] = [
-            'driver' => 'mysql',
-            'host' => $_POST['host'] ?? 'localhost',
-            'user' => $_POST['user'] ?? 'root',
-            'pass' => $_POST['pass'] ?? '',
+            'driver' => 'mysql', 'host' => $_POST['host'] ?? 'localhost',
+            'user' => $_POST['user'] ?? 'root', 'pass' => $_POST['pass'] ?? '',
             'dbname' => $_POST['dbname'] ?? 'db_voidbraver'
         ];
-        header("Location: index.php");
-        exit;
+        header("Location: index.php"); exit;
     } elseif (isset($_POST['connect_sqlite']) && isset($_FILES['sqlite_file'])) {
         $file = $_FILES['sqlite_file'];
-        if ($file['error'] === UPLOAD_ERR_OK) {
+        
+        $allowed_exts = ['sqlite', 'sqlite3', 'db'];
+        $file_ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+
+        if (!in_array($file_ext, $allowed_exts)) {
+            $conn_error = "Upload Gagal: Format file tidak didukung! Harap unggah file .sqlite, .sqlite3, atau .db.";
+        } elseif ($file['error'] === UPLOAD_ERR_OK) {
             $dest = __DIR__ . '/temp_sqlite_' . time() . '.db';
             if (!@move_uploaded_file($file['tmp_name'], $dest)) {
                 $dest = sys_get_temp_dir() . '/temp_sqlite_' . time() . '.db';
@@ -67,13 +69,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
             if (!isset($conn_error)) {
-                $_SESSION['db_connection'] = [
-                    'driver' => 'sqlite',
-                    'file' => $dest,
-                    'dbname' => basename($file['name'])
-                ];
-                header("Location: index.php");
-                exit;
+                $_SESSION['db_connection'] = ['driver' => 'sqlite', 'file' => $dest, 'dbname' => basename($file['name'])];
+                header("Location: index.php"); exit;
             }
         } else {
             $errCodes = [ UPLOAD_ERR_INI_SIZE => 'Ukuran file melebihi batas php.ini.', UPLOAD_ERR_PARTIAL => 'Terupload sebagian.', UPLOAD_ERR_NO_FILE => 'Tidak ada file.' ];
@@ -97,11 +94,7 @@ if ($pdo === null):
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
-        :root {
-            --theme-color: <?= $themeColor ?>;
-            --theme-color-hover: <?= $themeHover ?>;
-            --theme-bg-subtle: <?= $themeSubtle ?>;
-        }
+        :root { --theme-color: <?= $themeColor ?>; --theme-color-hover: <?= $themeHover ?>; --theme-bg-subtle: <?= $themeSubtle ?>; }
         body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #0f172a; color: #e2e8f0; }
         .text-theme { color: var(--theme-color) !important; }
         .bg-theme { background-color: var(--theme-color) !important; color: white !important; }
@@ -113,6 +106,7 @@ if ($pdo === null):
 </head>
 <body class="min-h-screen w-full flex items-center justify-center p-4 lg:p-8 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] overflow-y-auto selection:bg-theme selection:text-white">
     <div class="glass-card max-w-5xl w-full rounded-2xl shadow-2xl overflow-hidden flex flex-col lg:flex-row h-auto">
+        
         <div class="flex-1 p-6 lg:p-10 border-b lg:border-b-0 lg:border-r border-slate-700 relative">
             <h2 class="text-2xl font-bold text-theme mb-2"><i class="fa-solid fa-server mr-2"></i> MySQL Server</h2>
             <p class="text-sm text-slate-400 mb-6">Hubungkan ke database lokal atau remote.</p>
@@ -126,19 +120,10 @@ if ($pdo === null):
             <form method="POST" class="space-y-4" id="mysqlForm">
                 <input type="hidden" name="connect_mysql" value="1">
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                        <label class="block text-xs font-bold text-slate-400 mb-1">Host</label>
-                        <input type="text" name="host" id="host" value="localhost" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-sm outline-none focus:border-theme transition-colors">
-                    </div>
-                    <div>
-                        <label class="block text-xs font-bold text-slate-400 mb-1">User</label>
-                        <input type="text" name="user" id="user" value="root" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-sm outline-none focus:border-theme transition-colors">
-                    </div>
+                    <div><label class="block text-xs font-bold text-slate-400 mb-1">Host</label><input type="text" name="host" id="host" value="localhost" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-sm outline-none focus:border-theme transition-colors"></div>
+                    <div><label class="block text-xs font-bold text-slate-400 mb-1">User</label><input type="text" name="user" id="user" value="root" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-sm outline-none focus:border-theme transition-colors"></div>
                 </div>
-                <div>
-                    <label class="block text-xs font-bold text-slate-400 mb-1">Password</label>
-                    <input type="password" name="pass" id="pass" placeholder="(Kosongkan jika XAMPP)" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-sm outline-none focus:border-theme transition-colors">
-                </div>
+                <div><label class="block text-xs font-bold text-slate-400 mb-1">Password</label><input type="password" name="pass" id="pass" placeholder="(Kosongkan jika XAMPP)" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-sm outline-none focus:border-theme transition-colors"></div>
                 <div>
                     <div class="flex justify-between items-end mb-1">
                         <label class="block text-xs font-bold text-theme">Pilih Database</label>
@@ -147,11 +132,10 @@ if ($pdo === null):
                     <input type="text" name="dbname" id="dbInput" value="db_voidbraver" required class="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-sm outline-none text-theme font-bold tracking-wide focus:border-theme transition-colors">
                     <select id="dbSelect" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-sm outline-none text-theme font-bold cursor-pointer hidden focus:border-theme transition-colors"></select>
                 </div>
-                <button type="submit" class="w-full bg-theme hover-bg-theme font-bold py-3 px-4 rounded-xl transition-colors mt-4 shadow-lg shadow-black/20">
-                    Connect MySQL <i class="fa-solid fa-arrow-right ml-1"></i>
-                </button>
+                <button type="submit" class="w-full bg-theme hover-bg-theme font-bold py-3 px-4 rounded-xl transition-colors mt-4 shadow-lg shadow-black/20">Connect MySQL <i class="fa-solid fa-arrow-right ml-1"></i></button>
             </form>
         </div>
+
         <div class="flex-1 p-6 lg:p-10 bg-slate-800/50 flex flex-col justify-center">
             <h2 class="text-2xl font-bold text-emerald-500 mb-2"><i class="fa-solid fa-file-code mr-2"></i> SQLite File</h2>
             <p class="text-sm text-slate-400 mb-6">Unggah file .sqlite atau .db untuk diinspeksi.</p>
@@ -159,32 +143,39 @@ if ($pdo === null):
                 <input type="hidden" name="connect_sqlite" value="1">
                 <div class="flex-1 border-2 border-dashed border-slate-600 rounded-xl flex flex-col items-center justify-center p-8 text-center hover:border-emerald-500 hover:bg-emerald-500/5 transition-colors group cursor-pointer relative min-h-[250px]">
                     <input type="file" name="sqlite_file" accept=".sqlite,.db,.sqlite3" required class="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" 
-                    onchange="document.getElementById('uploadIcon').className = 'fa-solid fa-circle-notch fa-spin text-5xl text-emerald-500 mb-4'; document.getElementById('fileName').innerText = 'Memuat Database...'; document.getElementById('fileDesc').innerText = 'Mohon tunggu sebentar'; this.form.submit();">
+                    onchange="
+                        const allowedExts = ['sqlite', 'sqlite3', 'db'];
+                        const file = this.files[0];
+                        if (file) {
+                            const ext = file.name.split('.').pop().toLowerCase();
+                            if (!allowedExts.includes(ext)) {
+                                alert('Format file ditolak! Hanya menerima ekstensi .sqlite, .sqlite3, atau .db');
+                                this.value = ''; return false;
+                            }
+                            document.getElementById('uploadIcon').className = 'fa-solid fa-circle-notch fa-spin text-5xl text-emerald-500 mb-4'; 
+                            document.getElementById('fileName').innerText = 'Memuat Database...'; 
+                            document.getElementById('fileDesc').innerText = 'Mohon tunggu sebentar'; 
+                            this.form.submit();
+                        }
+                    ">
                     <i id="uploadIcon" class="fa-solid fa-cloud-arrow-up text-5xl text-slate-500 group-hover:text-emerald-500 mb-4 transition-colors"></i>
                     <p class="text-base font-bold text-slate-300 group-hover:text-emerald-400" id="fileName">Klik atau Drop file SQLite ke sini</p>
-                    <p class="text-sm text-slate-500 mt-2" id="fileDesc">Langsung otomatis terbuka</p>
+                    <p class="text-sm text-slate-500 mt-2" id="fileDesc">Mendukung file format .sqlite, .sqlite3, .db</p>
                 </div>
             </form>
         </div>
     </div>
     <script>
         async function loadDatabases() {
-            const btn = document.getElementById('btnLoadDb');
-            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Loading...';
-            const formData = new FormData();
-            formData.append('host', document.getElementById('host').value); 
-            formData.append('user', document.getElementById('user').value); 
-            formData.append('pass', document.getElementById('pass').value);
+            const btn = document.getElementById('btnLoadDb'); btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Loading...';
+            const formData = new FormData(); formData.append('host', document.getElementById('host').value); formData.append('user', document.getElementById('user').value); formData.append('pass', document.getElementById('pass').value);
             try {
-                const res = await fetch('?action=get_dbs', { method: 'POST', body: formData });
-                const data = await res.json();
+                const res = await fetch('?action=get_dbs', { method: 'POST', body: formData }); const data = await res.json();
                 if (data.success) {
-                    const select = document.getElementById('dbSelect');
-                    select.innerHTML = ''; let foundVoid = false;
+                    const select = document.getElementById('dbSelect'); select.innerHTML = ''; let foundVoid = false;
                     data.dbs.forEach(db => {
                         const opt = document.createElement('option'); opt.value = db; opt.innerText = db;
-                        if (db === 'db_voidbraver') { opt.selected = true; foundVoid = true; }
-                        select.appendChild(opt);
+                        if (db === 'db_voidbraver') { opt.selected = true; foundVoid = true; } select.appendChild(opt);
                     });
                     if(!foundVoid && data.dbs.length > 0) select.selectedIndex = 0;
                     select.classList.remove('hidden'); document.getElementById('dbInput').classList.add('hidden');
@@ -259,9 +250,7 @@ if ($currentTable) {
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
         :root { 
-            --theme-color: <?= $themeColor ?>; 
-            --theme-color-hover: <?= $themeHover ?>; 
-            --theme-bg-subtle: <?= $themeSubtle ?>; 
+            --theme-color: <?= $themeColor ?>; --theme-color-hover: <?= $themeHover ?>; --theme-bg-subtle: <?= $themeSubtle ?>; 
             --bg-base: #0f172a; --bg-panel: #1e293b; --border-color: #334155; 
         }
         body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: var(--bg-base); color: #e2e8f0; }
@@ -278,11 +267,15 @@ if ($currentTable) {
         ::-webkit-scrollbar-thumb:hover { background: var(--theme-color); }
         
         .table-wrapper { height: calc(100vh - 180px); }
+        @media (max-width: 768px) { .table-wrapper { height: calc(100vh - 140px); } }
         th { position: sticky; top: 0; z-index: 20; }
         
-        .sort-icon { opacity: 0.2; transition: all 0.2s; font-size: 0.7rem; margin-left: 6px; }
-        th.asc .sort-icon { opacity: 1; color: var(--theme-color); transform: rotate(180deg); }
-        th.desc .sort-icon { opacity: 1; color: var(--theme-color); }
+        /* Animasi Spin & Pop Untuk Sorting */
+        @keyframes spin-anim {
+            0% { transform: rotate(-180deg) scale(0.5); opacity: 0; }
+            100% { transform: rotate(0deg) scale(1); opacity: 1; }
+        }
+        .spin-anim { animation: spin-anim 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
         
         td { transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); position: relative; }
         td:hover { background: var(--theme-bg-subtle); color: var(--theme-color); cursor: pointer; }
@@ -292,7 +285,6 @@ if ($currentTable) {
         
         .glass-panel { background: rgba(30, 41, 59, 0.95); backdrop-filter: blur(20px); border: 1px solid var(--border-color); }
         .sidebar-link.active { background: var(--theme-bg-subtle); border-right: 3px solid var(--theme-color); color: var(--theme-color); font-weight: 600; }
-
         .sidebar-collapsed { width: 5rem !important; }
         .sidebar-collapsed .hide-on-collapse { display: none !important; }
         .sidebar-collapsed .show-on-collapse { display: flex !important; }
@@ -420,7 +412,8 @@ if ($currentTable) {
     <div id="sidebarOverlay" class="fixed inset-0 bg-black/50 z-30 hidden md:hidden backdrop-blur-sm" onclick="toggleSidebarMobile()"></div>
 
     <main class="flex-1 flex flex-col min-w-0 bg-[#0f172a] relative h-screen">
-        <header class="bg-[#1e293b] border-b border-slate-700 shadow-sm z-[70] relative shrink-0 h-[72px] md:h-auto flex items-center md:items-stretch">
+        
+        <header class="bg-[#1e293b] border-b border-slate-700 shadow-sm z-[70] relative shrink-0 h-[72px] md:h-auto flex flex-col justify-center">
             <div class="px-4 py-2 md:p-5 flex flex-1 flex-row justify-between items-center gap-4">
                 <div class="flex items-center gap-3 w-full md:w-auto">
                     <button onclick="toggleSidebarMobile()" class="md:hidden text-slate-400 hover:text-white p-2 -ml-2 rounded-lg hover:bg-slate-800 transition-colors"><i class="fa-solid fa-bars fa-lg"></i></button>
@@ -430,8 +423,8 @@ if ($currentTable) {
                         <p class="text-[10px] md:text-xs text-slate-400 mt-1" id="rowCount"><i class="fa-solid fa-chart-simple mr-1"></i> <?= count($rows) ?> baris dimuat</p>
                     </div>
                 </div>
-                <div class="flex items-center gap-2 md:gap-3 shrink-0 ml-auto">
-                    <div class="relative group hidden md:block shrink-0">
+                <div class="hidden md:flex items-center gap-2 md:gap-3 shrink-0 ml-auto">
+                    <div class="relative group shrink-0">
                         <i class="fa-solid fa-magnifying-glass absolute left-3 top-2.5 text-slate-500 group-focus-within:text-theme transition-colors text-xs md:text-sm"></i>
                         <input type="text" id="globalSearch" placeholder="Cari data..." class="pl-8 pr-3 py-1.5 md:py-2 bg-slate-900 border border-slate-700 focus:border-theme rounded-lg text-xs md:text-sm outline-none text-slate-200 transition-all w-32 md:w-56 focus:w-48 md:focus:w-72 shadow-inner">
                     </div>
@@ -441,7 +434,7 @@ if ($currentTable) {
                         </button>
                         <div class="absolute right-0 mt-2 w-56 md:w-64 bg-slate-800 border border-slate-700 rounded-lg shadow-2xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all p-2 flex flex-col gap-1 max-h-60 overflow-y-auto z-[100]" id="columnToggles"></div>
                     </div>
-                    <a href="?action=sqlite&table=<?= urlencode($currentTable) ?>" class="px-3 md:px-4 py-1.5 md:py-2 bg-slate-800 border border-slate-600 hover-border-theme hover-bg-theme text-slate-200 rounded-lg text-xs md:text-sm font-medium transition-all items-center gap-2 shadow-sm shrink-0 hidden md:flex">
+                    <a href="?action=sqlite&table=<?= urlencode($currentTable) ?>" class="px-3 md:px-4 py-1.5 md:py-2 bg-slate-800 border border-slate-600 hover-border-theme hover-bg-theme text-slate-200 rounded-lg text-xs md:text-sm font-medium transition-all flex items-center gap-2 shadow-sm shrink-0">
                         <i class="fa-solid fa-download"></i> <span class="hidden lg:inline">.sqlite</span>
                     </a>
                     <div class="flex bg-slate-900 rounded-lg p-1 border border-slate-700 shadow-inner shrink-0">
@@ -452,25 +445,28 @@ if ($currentTable) {
             </div>
             <div class="px-4 pb-3 md:hidden">
                 <div class="relative w-full">
-                    <i class="fa-solid fa-magnifying-glass absolute left-3 top-2.5 text-slate-500 text-xs"></i>
-                    <input type="text" id="globalSearchMobile" placeholder="Cari data..." class="w-full pl-8 pr-3 py-2 bg-slate-900 border border-slate-700 focus:border-theme rounded-lg text-sm outline-none text-slate-200 shadow-inner">
+                    <i class="fa-solid fa-magnifying-glass absolute left-4 top-3 text-slate-500 text-sm"></i>
+                    <input type="text" id="globalSearchMobile" placeholder="Cari data di tabel ini..." class="w-full pl-10 pr-4 py-2.5 bg-[#1e293b] border border-slate-700 focus:border-theme rounded-xl text-sm outline-none text-slate-200 shadow-lg transition-colors">
                 </div>
             </div>
         </header>
 
-        <div class="p-4 md:p-6 flex-1 overflow-hidden">
-            <div class="table-wrapper overflow-auto rounded-xl border border-slate-700 bg-[#1e293b] shadow-lg relative h-full">
+        <div class="p-4 md:p-6 flex-1 overflow-hidden z-10 relative flex flex-col gap-4">
+            <div class="overflow-auto rounded-xl border border-slate-700 bg-[#1e293b] shadow-lg relative flex-1 min-h-0">
                 <table class="w-full text-left border-collapse whitespace-nowrap" id="dataTable">
                     <?php if (!empty($rows)): ?>
                         <thead class="bg-slate-800 text-slate-300 text-xs uppercase tracking-wider select-none shadow-sm">
                             <tr id="tableHeaderRow">
                                 <?php foreach (array_keys($rows[0]) as $index => $col): ?>
-                                    <th class="border-b border-slate-700 font-semibold bg-slate-800 group">
+                                    <th class="border-b border-slate-700 font-semibold bg-slate-800 cursor-pointer hover-text-theme transition-colors group/th" onclick="sortTable(<?= $index ?>, this)" data-dir="">
                                         <div class="flex items-center justify-between px-4 md:px-5 py-3">
-                                            <div class="flex items-center gap-1 cursor-pointer hover-text-theme flex-1 transition-colors" onclick="sortTable(<?= $index ?>, this)">
-                                                <span class="flex-1"><?= htmlspecialchars($col) ?></span><i class="fa-solid fa-sort sort-icon"></i>
+                                            <div class="flex items-center gap-2 flex-1 min-w-0">
+                                                <span class="truncate"><?= htmlspecialchars($col) ?></span>
+                                                <i class="fa-solid fa-sort opacity-30 group-hover/th:opacity-100 transition-opacity text-slate-400 sort-icon-main"></i>
                                             </div>
-                                            <button class="opacity-0 group-hover:opacity-100 w-6 h-6 flex items-center justify-center hover:bg-slate-700 rounded transition-all text-slate-400 hover-text-theme ml-2" onclick="pinColumn(<?= $index ?>)" title="Pin Kolom"><i class="fa-solid fa-thumbtack"></i></button>
+                                            <button class="opacity-0 group-hover/th:opacity-100 w-6 h-6 flex items-center justify-center hover:bg-slate-700 rounded transition-all text-slate-400 hover-text-theme ml-2 shrink-0" onclick="event.stopPropagation(); pinColumn(<?= $index ?>)" title="Pin Kolom">
+                                                <i class="fa-solid fa-thumbtack"></i>
+                                            </button>
                                         </div>
                                     </th>
                                 <?php endforeach; ?>
@@ -498,16 +494,61 @@ if ($currentTable) {
                 </table>
             </div>
         </div>
+
+        <div class="md:hidden fixed bottom-6 right-6 z-[60]">
+            <button id="fabBtn" class="w-14 h-14 bg-theme text-white rounded-full shadow-[0_4px_15px_rgba(0,0,0,0.5)] flex items-center justify-center text-xl hover:scale-105 transition-transform" onclick="toggleMobileTools()">
+                <i class="fa-solid fa-screwdriver-wrench"></i>
+            </button>
+        </div>
+
+        <div id="mobileToolsOverlay" class="fixed inset-0 bg-black/60 z-[65] hidden backdrop-blur-sm" onclick="toggleMobileTools()"></div>
+        
+        <div id="mobileToolsSheet" class="fixed inset-x-0 bottom-0 z-[70] translate-y-full transition-transform duration-300 ease-out bg-[#1e293b] rounded-t-2xl shadow-[0_-10px_40px_rgba(0,0,0,0.5)] border-t border-slate-700 flex flex-col max-h-[85vh]">
+            <div class="p-5 border-b border-slate-700 flex justify-between items-center bg-slate-800/50 rounded-t-2xl">
+                <h3 class="font-bold text-white text-lg"><i class="fa-solid fa-sliders text-theme mr-2"></i> Alat Tabel</h3>
+                <button onclick="toggleMobileTools()" class="text-slate-400 p-2 hover:text-red-400 bg-slate-800 rounded-lg"><i class="fa-solid fa-xmark fa-lg"></i></button>
+            </div>
+            <div class="p-5 overflow-y-auto space-y-6">
+                <div>
+                    <label class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3 block"><i class="fa-solid fa-eye mr-1"></i> Mode Tampilan</label>
+                    <div class="flex bg-slate-900 rounded-lg p-1.5 border border-slate-700 shadow-inner w-full">
+                        <a href="?table=<?= urlencode($currentTable) ?>&mode=raw" class="flex-1 text-center py-2 rounded-md text-sm font-bold transition-colors <?= $mode === 'raw' ? 'bg-theme text-white shadow-sm' : 'text-slate-500' ?>"><i class="fa-solid fa-cube mr-1"></i> Raw</a>
+                        <a href="?table=<?= urlencode($currentTable) ?>&mode=join" class="flex-1 text-center py-2 rounded-md text-sm font-bold transition-colors <?= $mode === 'join' ? 'bg-theme text-white shadow-sm' : 'text-slate-500' ?>"><i class="fa-solid fa-link mr-1"></i> Joined</a>
+                    </div>
+                </div>
+                <div>
+                    <label class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3 block"><i class="fa-solid fa-download mr-1"></i> Ekspor Data</label>
+                    <a href="?action=sqlite&table=<?= urlencode($currentTable) ?>" class="w-full py-3 bg-slate-800 border border-slate-600 text-slate-200 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2 shadow-sm">
+                        <i class="fa-solid fa-file-arrow-down text-theme"></i> Download Tabel (.sqlite)
+                    </a>
+                </div>
+                <div>
+                    <label class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3 block"><i class="fa-solid fa-eye-slash mr-1"></i> Sembunyikan Kolom</label>
+                    <div id="mobileColumnToggles" class="grid grid-cols-2 gap-2 bg-slate-900/50 p-3 rounded-xl border border-slate-700"></div>
+                </div>
+            </div>
+        </div>
+
     </main>
 
     <script>
+        function toggleMobileTools() {
+            const sheet = document.getElementById('mobileToolsSheet');
+            const overlay = document.getElementById('mobileToolsOverlay');
+            if (sheet.classList.contains('translate-y-full')) {
+                sheet.classList.remove('translate-y-full'); overlay.classList.remove('hidden');
+            } else {
+                sheet.classList.add('translate-y-full'); overlay.classList.add('hidden');
+            }
+        }
+
         const sidebar = document.getElementById('appSidebar');
-        const overlay = document.getElementById('sidebarOverlay');
+        const overlaySidebar = document.getElementById('sidebarOverlay');
         let isDesktopCollapsed = false;
 
         function toggleSidebarMobile() {
             sidebar.classList.toggle('-translate-x-full');
-            overlay.classList.toggle('hidden');
+            overlaySidebar.classList.toggle('hidden');
         }
 
         function toggleSidebarDesktop() {
@@ -526,6 +567,10 @@ if ($currentTable) {
         function toggleSettings() {
             const m = document.getElementById('settingsModal');
             m.classList.toggle('hidden'); m.classList.toggle('flex');
+            if(!m.classList.contains('hidden')) {
+                const currentColor = getComputedStyle(document.documentElement).getPropertyValue('--theme-color').trim();
+                document.getElementById('colorPicker').value = currentColor || '#3b82f6';
+            }
         }
 
         function setTheme(hexColor) {
@@ -533,44 +578,46 @@ if ($currentTable) {
                 let color = hex.replace('#', '');
                 if (color.length === 3) color = color.split('').map(c => c + c).join('');
                 let num = parseInt(color, 16);
-                let r = Math.max(0, (num >> 16) - amount);
-                let g = Math.max(0, ((num >> 8) & 0x00FF) - amount);
-                let b = Math.max(0, (num & 0x0000FF) - amount);
+                let r = Math.max(0, (num >> 16) - amount); let g = Math.max(0, ((num >> 8) & 0x00FF) - amount); let b = Math.max(0, (num & 0x0000FF) - amount);
                 return '#' + (g | (b << 8) | (r << 16)).toString(16).padStart(6, '0');
             };
 
             const hexHover = darkenHex(hexColor, 20);
             const root = document.documentElement;
-            root.style.setProperty('--theme-color', hexColor);
-            root.style.setProperty('--theme-color-hover', hexHover);
+            root.style.setProperty('--theme-color', hexColor); root.style.setProperty('--theme-color-hover', hexHover);
             
             let c; if(/^#([A-Fa-f0-9]{3}){1,2}$/.test(hexColor)){
                 c= hexColor.substring(1).split('');
-                if(c.length== 3) c= [c[0], c[0], c[1], c[1], c[2], c[2]];
-                c= '0x'+c.join('');
+                if(c.length== 3) c= [c[0], c[0], c[1], c[1], c[2], c[2]]; c= '0x'+c.join('');
                 root.style.setProperty('--theme-bg-subtle', 'rgba('+[(c>>16)&255, (c>>8)&255, c&255].join(',')+',0.15)');
             }
             
             document.getElementById('colorPicker').value = hexColor;
-            
-            // Simpan Theme secara Global di Backend Session (AJAX)
-            const formData = new FormData();
-            formData.append('color', hexColor);
-            formData.append('hover', hexHover);
+            const formData = new FormData(); formData.append('action', 'save_theme'); formData.append('color', hexColor); formData.append('hover', hexHover);
             fetch('?action=save_theme', {method: 'POST', body: formData});
         }
 
         const colContainer = document.getElementById('columnToggles');
-        if (colContainer) {
+        const mobileColContainer = document.getElementById('mobileColumnToggles');
+        
+        if (colContainer && mobileColContainer) {
             document.querySelectorAll('#tableHeaderRow th').forEach((th, index) => {
                 let colNameText = th.querySelector('.flex-1')?.innerText.trim() || `Kolom ${index}`;
-                const label = document.createElement('label');
-                label.className = "flex items-center gap-3 px-3 py-2 hover:bg-slate-700 rounded-md cursor-pointer text-sm text-slate-300 transition-colors border border-transparent hover:border-slate-600";
-                label.innerHTML = `<input type="checkbox" checked class="rounded bg-slate-900 border-slate-600 text-theme focus:ring-theme w-4 h-4 cursor-pointer" onchange="toggleColumn(${index}, this.checked)"> <span class="truncate flex-1">${colNameText}</span>`;
-                colContainer.appendChild(label);
+                
+                const labelDesk = document.createElement('label');
+                labelDesk.className = "flex items-center gap-3 px-3 py-2 hover:bg-slate-700 rounded-md cursor-pointer text-sm text-slate-300 transition-colors border border-transparent hover:border-slate-600";
+                labelDesk.innerHTML = `<input type="checkbox" checked class="col-toggle-${index} rounded bg-slate-900 border-slate-600 text-theme focus:ring-theme w-4 h-4 cursor-pointer" onchange="toggleColumn(${index}, this.checked)"> <span class="truncate flex-1">${colNameText}</span>`;
+                colContainer.appendChild(labelDesk);
+
+                const labelMob = document.createElement('label');
+                labelMob.className = "flex items-center gap-2 p-2 bg-slate-800 rounded-lg cursor-pointer text-xs text-slate-300 border border-slate-700 active:border-theme";
+                labelMob.innerHTML = `<input type="checkbox" checked class="col-toggle-${index} rounded bg-slate-900 border-slate-600 text-theme focus:ring-theme w-4 h-4 cursor-pointer" onchange="toggleColumn(${index}, this.checked)"> <span class="truncate flex-1">${colNameText}</span>`;
+                mobileColContainer.appendChild(labelMob);
             });
         }
+
         function toggleColumn(index, isVisible) {
+            document.querySelectorAll(`.col-toggle-${index}`).forEach(cb => cb.checked = isVisible);
             const n = index + 1;
             document.querySelectorAll(`#dataTable th:nth-child(${n}), #dataTable td:nth-child(${n})`).forEach(cell => { cell.style.display = isVisible ? '' : 'none'; });
             if (!isVisible && currentPinnedIndex === index) pinColumn(index);
@@ -596,17 +643,37 @@ if ($currentTable) {
             }
         }
 
+        // --- SORTING TABEL UTAMA DENGAN ANIMASI SPIN & POP ---
         function sortTable(n, headerElem) {
             const tbody = document.querySelector("#dataTable tbody");
             const rows = Array.from(tbody.querySelectorAll("tr.data-row"));
-            document.querySelectorAll("#tableHeaderRow th").forEach(th => th.classList.remove('asc', 'desc'));
+            const table = headerElem.closest('table');
+            
+            // Reset ikon sort kolom lain
+            table.querySelectorAll('th').forEach(th => {
+                if (th !== headerElem) {
+                    th.dataset.dir = '';
+                    const icon = th.querySelector('i.fa-sort-up, i.fa-sort-down, i.fa-sort');
+                    if(icon) icon.className = 'fa-solid fa-sort opacity-30 group-hover/th:opacity-100 transition-opacity text-slate-400 sort-icon-main';
+                }
+            });
+
             let isAsc = headerElem.dataset.dir !== 'asc';
             headerElem.dataset.dir = isAsc ? 'asc' : 'desc';
-            headerElem.closest('th').classList.add(isAsc ? 'asc' : 'desc');
+            
+            // Ubah Ikon dan Beri Animasi Spin
+            const icon = headerElem.querySelector('i.sort-icon-main');
+            if(icon) {
+                icon.className = isAsc ? 'fa-solid fa-sort-up text-theme opacity-100 sort-icon-main spin-anim' : 'fa-solid fa-sort-down text-theme opacity-100 sort-icon-main spin-anim';
+                // Trik agar animasi bisa diputar ulang (re-trigger)
+                icon.classList.remove('spin-anim');
+                void icon.offsetWidth; 
+                icon.classList.add('spin-anim');
+            }
+
             rows.sort((a, b) => {
                 let x = a.children[n].innerText.trim(), y = b.children[n].innerText.trim();
-                if(x === 'NULL') return isAsc ? -1 : 1;
-                if(y === 'NULL') return isAsc ? 1 : -1;
+                if(x === 'NULL') return isAsc ? -1 : 1; if(y === 'NULL') return isAsc ? 1 : -1;
                 let numX = parseFloat(x), numY = parseFloat(y);
                 if(!isNaN(numX) && !isNaN(numY)) return isAsc ? numX - numY : numY - numX;
                 return isAsc ? x.localeCompare(y) : y.localeCompare(x);
@@ -614,32 +681,32 @@ if ($currentTable) {
             rows.forEach(row => tbody.appendChild(row));
         }
 
-        // --- SORTING KHUSUS TABEL DI DALAM INSPECTOR ---
+        // --- SORTING TABEL INSPECTOR DENGAN ANIMASI SPIN & POP ---
         function sortInspectorTable(headerElem, n) {
-            const table = headerElem.closest('table');
-            const tbody = table.querySelector('tbody');
+            const table = headerElem.closest('table'); const tbody = table.querySelector('tbody');
             const rows = Array.from(tbody.querySelectorAll('tr'));
             
-            // Reset state kolom lain
             table.querySelectorAll('th').forEach(th => {
                 if (th !== headerElem) {
-                    th.classList.remove('asc', 'desc');
-                    const icon = th.querySelector('i.fa-sort-up, i.fa-sort-down');
+                    th.dataset.dir = '';
+                    const icon = th.querySelector('i.fa-sort-up, i.fa-sort-down, i.fa-sort');
                     if(icon) icon.className = 'fa-solid fa-sort opacity-30 group-hover/th:opacity-100 transition-opacity sort-icon-insp';
                 }
             });
 
-            let isAsc = headerElem.dataset.dir !== 'asc';
-            headerElem.dataset.dir = isAsc ? 'asc' : 'desc';
-            headerElem.classList.add(isAsc ? 'asc' : 'desc');
+            let isAsc = headerElem.dataset.dir !== 'asc'; headerElem.dataset.dir = isAsc ? 'asc' : 'desc';
             
             const icon = headerElem.querySelector('i');
-            icon.className = isAsc ? 'fa-solid fa-sort-up text-theme opacity-100' : 'fa-solid fa-sort-down text-theme opacity-100';
+            if(icon) {
+                icon.className = isAsc ? 'fa-solid fa-sort-up text-theme opacity-100 spin-anim' : 'fa-solid fa-sort-down text-theme opacity-100 spin-anim';
+                icon.classList.remove('spin-anim');
+                void icon.offsetWidth; 
+                icon.classList.add('spin-anim');
+            }
 
             rows.sort((a, b) => {
                 let x = a.children[n].innerText.trim(), y = b.children[n].innerText.trim();
-                if(x === 'NULL') return isAsc ? -1 : 1;
-                if(y === 'NULL') return isAsc ? 1 : -1;
+                if(x === 'NULL') return isAsc ? -1 : 1; if(y === 'NULL') return isAsc ? 1 : -1;
                 let numX = parseFloat(x), numY = parseFloat(y);
                 if(!isNaN(numX) && !isNaN(numY)) return isAsc ? numX - numY : numY - numX;
                 return isAsc ? x.localeCompare(y) : y.localeCompare(x);
@@ -655,13 +722,11 @@ if ($currentTable) {
             });
             document.getElementById('rowCount').innerHTML = `<i class="fa-solid fa-chart-simple mr-1"></i> ${count} baris dimuat`;
         };
-        const searchDesk = document.getElementById('globalSearch');
-        const searchMob = document.getElementById('globalSearchMobile');
+        const searchDesk = document.getElementById('globalSearch'); const searchMob = document.getElementById('globalSearchMobile');
         if(searchDesk) searchDesk.addEventListener('keyup', (e) => executeSearch(e.target.value));
         if(searchMob) searchMob.addEventListener('keyup', (e) => executeSearch(e.target.value));
 
-        const modal = document.getElementById('tracerModal');
-        const tracerBody = document.getElementById('tracerBody');
+        const modal = document.getElementById('tracerModal'); const tracerBody = document.getElementById('tracerBody');
         let traceHistory = []; let currentTraceData = null; let currentTracerMode = 'raw'; 
 
         function changeTracerMode(mode) {
@@ -670,10 +735,7 @@ if ($currentTable) {
             const inactCls = 'px-3 py-1 rounded text-xs font-bold text-slate-400 hover:text-white transition-colors';
             document.getElementById('tracerModeRaw').className = mode === 'raw' ? actCls : inactCls;
             document.getElementById('tracerModeJoin').className = mode === 'join' ? actCls : inactCls;
-            if(traceHistory.length > 0) {
-                const last = traceHistory[traceHistory.length - 1];
-                executeTrace(last.table, last.col, last.val, true); 
-            }
+            if(traceHistory.length > 0) { const last = traceHistory[traceHistory.length - 1]; executeTrace(last.table, last.col, last.val, true); }
         }
 
         function startTrace(tableName, colName, value) {
@@ -688,9 +750,7 @@ if ($currentTable) {
 
         function goBackTracer() {
             if (traceHistory.length > 1) {
-                traceHistory.pop(); 
-                const prev = traceHistory[traceHistory.length - 1]; 
-                executeTrace(prev.table, prev.col, prev.val, true);
+                traceHistory.pop(); const prev = traceHistory[traceHistory.length - 1]; executeTrace(prev.table, prev.col, prev.val, true);
             }
         }
 
@@ -712,9 +772,7 @@ if ($currentTable) {
                 const resData = await response.json();
                 if(resData.error) throw new Error(resData.message);
                 
-                currentTraceData = resData.data;
-                updateFilterBadges();
-                renderTracerData('all'); 
+                currentTraceData = resData.data; updateFilterBadges(); renderTracerData('all'); 
             } catch (err) {
                 tracerBody.innerHTML = `<div class="text-red-400 bg-red-900/20 border border-red-900 p-6 rounded-xl flex items-center gap-3"><i class="fa-solid fa-triangle-exclamation fa-2x"></i> Error: ${err.message}</div>`;
             }
@@ -730,20 +788,17 @@ if ($currentTable) {
         document.querySelectorAll('.filter-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 document.querySelectorAll('.filter-btn').forEach(b => {
-                    b.classList.remove('bg-theme', 'text-white', 'shadow-sm');
-                    b.classList.add('text-slate-400', 'hover:bg-slate-700');
+                    b.classList.remove('bg-theme', 'text-white', 'shadow-sm'); b.classList.add('text-slate-400', 'hover:bg-slate-700');
                 });
                 const target = e.currentTarget;
-                target.classList.remove('text-slate-400', 'hover:bg-slate-700');
-                target.classList.add('bg-theme', 'text-white', 'shadow-sm');
+                target.classList.remove('text-slate-400', 'hover:bg-slate-700'); target.classList.add('bg-theme', 'text-white', 'shadow-sm');
                 renderTracerData(target.dataset.filter);
             });
         });
 
         function renderTracerData(filter) {
             if(!currentTraceData) return;
-            const d = currentTraceData;
-            let html = '';
+            const d = currentTraceData; let html = '';
 
             const renderBlock = (groups, sectionTitle, iconHtml, colorCls) => {
                 if(groups.length === 0) return '';
@@ -754,11 +809,11 @@ if ($currentTable) {
                     blockHtml += `
                         <div class="bg-[#1e293b] border border-slate-700 rounded-xl overflow-hidden shadow-md">
                             <div class="bg-slate-800 px-4 py-3 flex flex-wrap justify-between items-center border-b border-slate-700 gap-2">
-                                <div class="flex items-center">
+                                <div class="flex items-center min-w-0">
                                     <span class="text-[10px] text-${colorCls} font-bold uppercase tracking-widest bg-slate-900 px-2.5 py-1 rounded border border-slate-700 shrink-0">${group.type}</span>
                                     <span class="text-sm text-white font-bold tracking-wide flex items-center gap-2 truncate ml-3"><i class="fa-solid fa-table text-slate-500 hidden md:inline"></i> <span class="truncate">${group.table}</span> <span class="bg-slate-700 text-slate-300 text-[10px] px-2 py-0.5 rounded-full ml-1 shrink-0">${group.data.length} baris</span></span>
                                 </div>
-                                <a href="?table=${encodeURIComponent(group.table)}" class="text-xs bg-theme/20 text-theme hover-bg-theme px-3 py-1.5 rounded transition-colors flex items-center gap-2 shrink-0 font-bold border border-theme/30">
+                                <a href="?table=${encodeURIComponent(group.table)}" class="text-xs bg-theme/20 text-theme hover-bg-theme px-3 py-1.5 rounded transition-colors flex items-center gap-2 shrink-0 font-bold border border-theme/30 ml-auto">
                                     <i class="fa-solid fa-arrow-up-right-from-square"></i> <span class="hidden md:inline">Buka Tabel</span>
                                 </a>
                             </div>
@@ -769,7 +824,7 @@ if ($currentTable) {
                                             <th class="px-4 py-3 font-semibold border-b border-slate-700 whitespace-nowrap cursor-pointer hover-text-theme transition-colors group/th" onclick="sortInspectorTable(this, ${idx})">
                                                 <div class="flex items-center justify-between gap-2">
                                                     <span>${k}</span>
-                                                    <i class="fa-solid fa-sort opacity-30 group-hover/th:opacity-100 transition-opacity sort-icon-insp"></i>
+                                                    <i class="fa-solid fa-sort opacity-30 group-hover/th:opacity-100 transition-opacity sort-icon-insp text-slate-500"></i>
                                                 </div>
                                             </th>`).join('')}
                                         </tr>
@@ -792,20 +847,14 @@ if ($currentTable) {
                 return blockHtml + `</div>`;
             };
 
-            if (filter === 'all' || filter === 'source_row') {
-                html += renderBlock(d.source_row, "Data Baris Utama (Entity Konteks)", '<i class="fa-solid fa-crosshairs"></i>', 'blue-400');
-            }
+            if (filter === 'all' || filter === 'source_row') html += renderBlock(d.source_row, "Data Baris Utama", '<i class="fa-solid fa-crosshairs"></i>', 'blue-400');
             if (filter === 'all' || filter === 'row_relations') {
                 html += renderBlock(d.row_relations, "Relasi Terhubung (ID Entitas)", '<i class="fa-solid fa-link"></i>', 'emerald-400');
                 html += renderBlock(d.value_relations, "Relasi Berdasarkan Value Sel", '<i class="fa-solid fa-puzzle-piece"></i>', 'emerald-400');
             }
-            if (filter === 'all' || filter === 'global_matches') {
-                html += renderBlock(d.global_matches, "Ditemukan Juga Di (Pencarian Teks Global)", '<i class="fa-solid fa-globe"></i>', 'purple-400');
-            }
+            if (filter === 'all' || filter === 'global_matches') html += renderBlock(d.global_matches, "Ditemukan Juga Di", '<i class="fa-solid fa-globe"></i>', 'purple-400');
 
-            if(html === '') {
-                html = `<div class="text-center p-8 md:p-12 bg-slate-800/50 rounded-xl border border-slate-700"><i class="fa-solid fa-box-open text-4xl text-slate-600 mb-4"></i><p class="text-slate-400">Tidak ada data untuk kategori ini.</p></div>`;
-            }
+            if(html === '') html = `<div class="text-center p-8 md:p-12 bg-slate-800/50 rounded-xl border border-slate-700"><i class="fa-solid fa-box-open text-4xl text-slate-600 mb-4"></i><p class="text-slate-400">Tidak ada data untuk kategori ini.</p></div>`;
             tracerBody.innerHTML = html;
         }
 
