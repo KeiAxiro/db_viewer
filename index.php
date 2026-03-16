@@ -54,7 +54,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         header("Location: index.php"); exit;
     } elseif (isset($_POST['connect_sqlite']) && isset($_FILES['sqlite_file'])) {
         $file = $_FILES['sqlite_file'];
-        
         $allowed_exts = ['sqlite', 'sqlite3', 'db'];
         $file_ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
 
@@ -73,7 +72,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 header("Location: index.php"); exit;
             }
         } else {
-            $errCodes = [ UPLOAD_ERR_INI_SIZE => 'Ukuran file melebihi batas php.ini.', UPLOAD_ERR_PARTIAL => 'Terupload sebagian.', UPLOAD_ERR_NO_FILE => 'Tidak ada file.' ];
+            $errCodes = [ UPLOAD_ERR_INI_SIZE => 'Ukuran file melebihi batas php.ini.', UPLOAD_ERR_PARTIAL => 'Terupload sebagian.', UPLOAD_ERR_NO_FILE => 'Tidak ada file yang diunggah.' ];
             $conn_error = "Upload Gagal: " . ($errCodes[$file['error']] ?? "Error Code {$file['error']}");
         }
     }
@@ -106,17 +105,10 @@ if ($pdo === null):
 </head>
 <body class="min-h-screen w-full flex items-center justify-center p-4 lg:p-8 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] overflow-y-auto selection:bg-theme selection:text-white">
     <div class="glass-card max-w-5xl w-full rounded-2xl shadow-2xl overflow-hidden flex flex-col lg:flex-row h-auto">
-        
         <div class="flex-1 p-6 lg:p-10 border-b lg:border-b-0 lg:border-r border-slate-700 relative">
             <h2 class="text-2xl font-bold text-theme mb-2"><i class="fa-solid fa-server mr-2"></i> MySQL Server</h2>
             <p class="text-sm text-slate-400 mb-6">Hubungkan ke database lokal atau remote.</p>
-            
-            <?php if(isset($conn_error)): ?>
-                <div class="bg-red-500/10 border border-red-500 text-red-400 p-3 rounded-lg text-xs mb-4">
-                    <i class="fa-solid fa-triangle-exclamation"></i> <?= htmlspecialchars($conn_error) ?>
-                </div>
-            <?php endif; ?>
-
+            <?php if(isset($conn_error)): ?><div class="bg-red-500/10 border border-red-500 text-red-400 p-3 rounded-lg text-xs mb-4"><i class="fa-solid fa-triangle-exclamation"></i> <?= htmlspecialchars($conn_error) ?></div><?php endif; ?>
             <form method="POST" class="space-y-4" id="mysqlForm">
                 <input type="hidden" name="connect_mysql" value="1">
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -135,7 +127,6 @@ if ($pdo === null):
                 <button type="submit" class="w-full bg-theme hover-bg-theme font-bold py-3 px-4 rounded-xl transition-colors mt-4 shadow-lg shadow-black/20">Connect MySQL <i class="fa-solid fa-arrow-right ml-1"></i></button>
             </form>
         </div>
-
         <div class="flex-1 p-6 lg:p-10 bg-slate-800/50 flex flex-col justify-center">
             <h2 class="text-2xl font-bold text-emerald-500 mb-2"><i class="fa-solid fa-file-code mr-2"></i> SQLite File</h2>
             <p class="text-sm text-slate-400 mb-6">Unggah file .sqlite atau .db untuk diinspeksi.</p>
@@ -144,13 +135,10 @@ if ($pdo === null):
                 <div class="flex-1 border-2 border-dashed border-slate-600 rounded-xl flex flex-col items-center justify-center p-8 text-center hover:border-emerald-500 hover:bg-emerald-500/5 transition-colors group cursor-pointer relative min-h-[250px]">
                     <input type="file" name="sqlite_file" accept=".sqlite,.db,.sqlite3" required class="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" 
                     onchange="
-                        const allowedExts = ['sqlite', 'sqlite3', 'db'];
-                        const file = this.files[0];
+                        const allowedExts = ['sqlite', 'sqlite3', 'db']; const file = this.files[0];
                         if (file) {
-                            const ext = file.name.split('.').pop().toLowerCase();
-                            if (!allowedExts.includes(ext)) {
-                                alert('Format file ditolak! Hanya menerima ekstensi .sqlite, .sqlite3, atau .db');
-                                this.value = ''; return false;
+                            if (!allowedExts.includes(file.name.split('.').pop().toLowerCase())) {
+                                alert('Format ditolak! Hanya menerima .sqlite, .sqlite3, atau .db'); this.value = ''; return false;
                             }
                             document.getElementById('uploadIcon').className = 'fa-solid fa-circle-notch fa-spin text-5xl text-emerald-500 mb-4'; 
                             document.getElementById('fileName').innerText = 'Memuat Database...'; 
@@ -249,12 +237,25 @@ if ($currentTable) {
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+        
         :root { 
-            --theme-color: <?= $themeColor ?>; --theme-color-hover: <?= $themeHover ?>; --theme-bg-subtle: <?= $themeSubtle ?>; 
+            /* THEME & A11Y VARIABLES */
+            --theme-color: <?= $themeColor ?>; 
+            --theme-color-hover: <?= $themeHover ?>; 
+            --theme-bg-subtle: <?= $themeSubtle ?>; 
             --bg-base: #0f172a; --bg-panel: #1e293b; --border-color: #334155; 
+            
+            /* Variabel Aksesibilitas (Diubah via JS) */
+            --app-font-scale: 16px;
+            --cell-py: 0.75rem; 
+            --cell-px: 1.25rem;
         }
+        
+        html { font-size: var(--app-font-scale); } /* Global Font Scaling */
+
         body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: var(--bg-base); color: #e2e8f0; }
         .font-mono { font-family: 'JetBrains Mono', monospace; }
+        
         .text-theme { color: var(--theme-color) !important; }
         .bg-theme { background-color: var(--theme-color) !important; color: white !important;}
         .border-theme { border-color: var(--theme-color) !important; }
@@ -266,15 +267,13 @@ if ($currentTable) {
         ::-webkit-scrollbar-thumb { background: #475569; border-radius: 10px; }
         ::-webkit-scrollbar-thumb:hover { background: var(--theme-color); }
         
-        .table-wrapper { height: calc(100vh - 180px); }
-        @media (max-width: 768px) { .table-wrapper { height: calc(100vh - 140px); } }
         th { position: sticky; top: 0; z-index: 20; }
         
+        /* Table Dynamic Padding */
+        .cell-pad { padding: var(--cell-py) var(--cell-px) !important; }
+
         /* Animasi Spin & Pop Untuk Sorting */
-        @keyframes spin-anim {
-            0% { transform: rotate(-180deg) scale(0.5); opacity: 0; }
-            100% { transform: rotate(0deg) scale(1); opacity: 1; }
-        }
+        @keyframes spin-anim { 0% { transform: rotate(-180deg) scale(0.5); opacity: 0; } 100% { transform: rotate(0deg) scale(1); opacity: 1; } }
         .spin-anim { animation: spin-anim 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
         
         td { transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); position: relative; }
@@ -291,16 +290,25 @@ if ($currentTable) {
         .sidebar-collapsed .center-on-collapse { justify-content: center !important; padding-left: 0; padding-right: 0; }
     </style>
     <style id="dynamicPinStyle"></style>
+    
+    <script>
+        const savedFontSize = localStorage.getItem('voidDbFontSize') || '16';
+        const savedDensity = JSON.parse(localStorage.getItem('voidDbDensity')) || {py: '0.75rem', px: '1.25rem'};
+        document.documentElement.style.setProperty('--app-font-scale', savedFontSize + 'px');
+        document.documentElement.style.setProperty('--cell-py', savedDensity.py);
+        document.documentElement.style.setProperty('--cell-px', savedDensity.px);
+    </script>
 </head>
 <body class="flex h-screen overflow-hidden antialiased selection:bg-theme selection:text-white">
 
     <div id="settingsModal" class="fixed inset-0 z-[120] hidden items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm transition-opacity">
-        <div class="bg-[#1e293b] border border-slate-700 w-full max-w-md rounded-xl shadow-2xl flex flex-col overflow-hidden">
-            <div class="p-5 border-b border-slate-700/50 flex justify-between items-center bg-slate-800/50">
+        <div class="bg-[#1e293b] border border-slate-700 w-full max-w-lg rounded-xl shadow-2xl flex flex-col overflow-hidden max-h-[90vh]">
+            <div class="p-5 border-b border-slate-700/50 flex justify-between items-center bg-slate-800/50 shrink-0">
                 <h3 class="text-lg font-bold text-white flex items-center gap-2"><i class="fa-solid fa-gear text-slate-400"></i> Konfigurasi Sistem</h3>
                 <button onclick="toggleSettings()" class="text-slate-400 hover:text-red-400"><i class="fa-solid fa-xmark fa-lg"></i></button>
             </div>
-            <div class="p-6 space-y-6">
+            <div class="p-6 space-y-8 overflow-y-auto">
+                
                 <?php if ($driver === 'mysql' && $sessionConn): ?>
                 <div>
                     <label class="text-xs text-slate-400 block mb-2 uppercase font-bold tracking-wider"><i class="fa-solid fa-user mr-1"></i> Informasi Profil</label>
@@ -311,6 +319,7 @@ if ($currentTable) {
                     </div>
                 </div>
                 <?php endif; ?>
+
                 <div>
                     <label class="text-xs text-slate-400 block mb-3 uppercase font-bold tracking-wider"><i class="fa-solid fa-palette mr-1"></i> Aksen Warna Tema</label>
                     <div class="flex flex-wrap gap-3 items-center">
@@ -327,7 +336,30 @@ if ($currentTable) {
                         </div>
                     </div>
                 </div>
+
                 <div>
+                    <label class="text-xs text-slate-400 block mb-3 uppercase font-bold tracking-wider"><i class="fa-solid fa-universal-access mr-1"></i> Aksesibilitas & Tampilan</label>
+                    <div class="space-y-4">
+                        <div>
+                            <p class="text-xs text-slate-500 mb-2">Ukuran Huruf (Global Zoom)</p>
+                            <div class="flex bg-slate-900 rounded-lg p-1 border border-slate-700 shadow-inner w-full">
+                                <button onclick="setA11y('font', 14)" id="font14" class="flex-1 py-1.5 rounded-md text-xs font-bold transition-colors">Kecil</button>
+                                <button onclick="setA11y('font', 16)" id="font16" class="flex-1 py-1.5 rounded-md text-xs font-bold transition-colors">Normal</button>
+                                <button onclick="setA11y('font', 18)" id="font18" class="flex-1 py-1.5 rounded-md text-xs font-bold transition-colors">Besar</button>
+                            </div>
+                        </div>
+                        <div>
+                            <p class="text-xs text-slate-500 mb-2">Kerapatan Tabel (Padding)</p>
+                            <div class="flex bg-slate-900 rounded-lg p-1 border border-slate-700 shadow-inner w-full">
+                                <button onclick="setA11y('density', 'tight')" id="denseTight" class="flex-1 py-1.5 rounded-md text-xs font-bold transition-colors">Rapat</button>
+                                <button onclick="setA11y('density', 'normal')" id="denseNormal" class="flex-1 py-1.5 rounded-md text-xs font-bold transition-colors">Normal</button>
+                                <button onclick="setA11y('density', 'loose')" id="denseLoose" class="flex-1 py-1.5 rounded-md text-xs font-bold transition-colors">Longgar</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="pt-2">
                     <label class="text-xs text-slate-400 block mb-3 uppercase font-bold tracking-wider"><i class="fa-solid fa-hard-drive mr-1"></i> Database Backup</label>
                     <a href="?action=sqlite_all" class="w-full py-3 px-4 bg-slate-700 hover:bg-slate-600 border border-slate-600 rounded-lg text-white font-medium flex items-center justify-center gap-2">
                         <i class="fa-solid fa-file-arrow-down text-theme"></i> Unduh Full DB (.sqlite)
@@ -414,8 +446,9 @@ if ($currentTable) {
     <main class="flex-1 flex flex-col min-w-0 bg-[#0f172a] relative h-screen">
         
         <header class="bg-[#1e293b] border-b border-slate-700 shadow-sm z-[70] relative shrink-0 h-[72px] md:h-auto flex flex-col justify-center">
-            <div class="px-4 py-2 md:p-5 flex flex-1 flex-row justify-between items-center gap-4">
-                <div class="flex items-center gap-3 w-full md:w-auto">
+            
+            <div id="mobileHeaderNormal" class="px-4 py-2 md:p-5 flex flex-1 flex-row justify-between items-center gap-4 transition-all">
+                <div class="flex items-center gap-3 min-w-0 w-full md:w-auto">
                     <button onclick="toggleSidebarMobile()" class="md:hidden text-slate-400 hover:text-white p-2 -ml-2 rounded-lg hover:bg-slate-800 transition-colors"><i class="fa-solid fa-bars fa-lg"></i></button>
                     <div class="w-10 h-10 rounded-lg bg-theme/10 border border-theme/20 items-center justify-center text-theme shrink-0 hidden md:flex"><i class="fa-solid fa-table-list fa-lg"></i></div>
                     <div class="min-w-0 flex-1">
@@ -423,10 +456,15 @@ if ($currentTable) {
                         <p class="text-[10px] md:text-xs text-slate-400 mt-1" id="rowCount"><i class="fa-solid fa-chart-simple mr-1"></i> <?= count($rows) ?> baris dimuat</p>
                     </div>
                 </div>
+                
+                <button onclick="toggleMobileSearch(true)" class="md:hidden text-slate-400 hover:text-theme p-2.5 rounded-lg bg-slate-800 border border-slate-700 shrink-0 shadow-sm transition-colors">
+                    <i class="fa-solid fa-magnifying-glass"></i>
+                </button>
+
                 <div class="hidden md:flex items-center gap-2 md:gap-3 shrink-0 ml-auto">
                     <div class="relative group shrink-0">
                         <i class="fa-solid fa-magnifying-glass absolute left-3 top-2.5 text-slate-500 group-focus-within:text-theme transition-colors text-xs md:text-sm"></i>
-                        <input type="text" id="globalSearch" placeholder="Cari data..." class="pl-8 pr-3 py-1.5 md:py-2 bg-slate-900 border border-slate-700 focus:border-theme rounded-lg text-xs md:text-sm outline-none text-slate-200 transition-all w-32 md:w-56 focus:w-48 md:focus:w-72 shadow-inner">
+                        <input type="text" id="globalSearchDesk" placeholder="Cari data..." class="pl-8 pr-3 py-1.5 md:py-2 bg-slate-900 border border-slate-700 focus:border-theme rounded-lg text-xs md:text-sm outline-none text-slate-200 transition-all w-32 md:w-56 focus:w-48 md:focus:w-72 shadow-inner">
                     </div>
                     <div class="relative group shrink-0">
                         <button class="px-3 md:px-4 py-1.5 md:py-2 bg-slate-800 border border-slate-600 hover:border-slate-500 rounded-lg text-xs md:text-sm transition-colors flex items-center gap-2 text-slate-200 shadow-sm">
@@ -443,23 +481,25 @@ if ($currentTable) {
                     </div>
                 </div>
             </div>
-            <div class="px-4 pb-3 md:hidden">
-                <div class="relative w-full">
-                    <i class="fa-solid fa-magnifying-glass absolute left-4 top-3 text-slate-500 text-sm"></i>
-                    <input type="text" id="globalSearchMobile" placeholder="Cari data di tabel ini..." class="w-full pl-10 pr-4 py-2.5 bg-[#1e293b] border border-slate-700 focus:border-theme rounded-xl text-sm outline-none text-slate-200 shadow-lg transition-colors">
+
+            <div id="mobileHeaderSearch" class="hidden absolute inset-0 bg-[#1e293b] z-20 px-4 items-center w-full">
+                <div class="relative w-full flex items-center">
+                    <i class="fa-solid fa-magnifying-glass absolute left-4 text-theme text-sm z-10"></i>
+                    <input type="text" id="globalSearchMobile" placeholder="Ketik untuk mencari..." class="w-full pl-10 pr-12 py-3 bg-slate-900 border border-theme rounded-xl text-sm outline-none text-white shadow-lg transition-colors">
+                    <button onclick="toggleMobileSearch(false)" class="absolute right-3 text-slate-400 hover:text-red-400 p-2 rounded-lg bg-slate-800 transition-colors"><i class="fa-solid fa-xmark"></i></button>
                 </div>
             </div>
         </header>
 
-        <div class="p-4 md:p-6 flex-1 overflow-hidden z-10 relative flex flex-col gap-4">
-            <div class="overflow-auto rounded-xl border border-slate-700 bg-[#1e293b] shadow-lg relative flex-1 min-h-0">
+        <div class="p-4 md:p-6 flex-1 min-h-0 relative flex flex-col z-10">
+            <div class="overflow-auto rounded-xl border border-slate-700 bg-[#1e293b] shadow-lg relative flex-1">
                 <table class="w-full text-left border-collapse whitespace-nowrap" id="dataTable">
                     <?php if (!empty($rows)): ?>
                         <thead class="bg-slate-800 text-slate-300 text-xs uppercase tracking-wider select-none shadow-sm">
                             <tr id="tableHeaderRow">
                                 <?php foreach (array_keys($rows[0]) as $index => $col): ?>
-                                    <th class="border-b border-slate-700 font-semibold bg-slate-800 cursor-pointer hover-text-theme transition-colors group/th" onclick="sortTable(<?= $index ?>, this)" data-dir="">
-                                        <div class="flex items-center justify-between px-4 md:px-5 py-3">
+                                    <th class="border-b border-slate-700 font-semibold bg-slate-800 cursor-pointer hover-text-theme transition-colors group/th cell-pad" onclick="sortTable(<?= $index ?>, this)" data-dir="">
+                                        <div class="flex items-center justify-between">
                                             <div class="flex items-center gap-2 flex-1 min-w-0">
                                                 <span class="truncate"><?= htmlspecialchars($col) ?></span>
                                                 <i class="fa-solid fa-sort opacity-30 group-hover/th:opacity-100 transition-opacity text-slate-400 sort-icon-main"></i>
@@ -481,7 +521,7 @@ if ($currentTable) {
                                     foreach ($row as $cell): 
                                         $colName = $colKeys[$colIndex];
                                     ?>
-                                        <td class="py-2.5 px-4 md:px-5" onclick="startTrace('<?= htmlspecialchars($currentTable) ?>', '<?= htmlspecialchars($colName) ?>', '<?= htmlspecialchars($cell ?? '') ?>')">
+                                        <td class="cell-pad" onclick="startTrace('<?= htmlspecialchars($currentTable) ?>', '<?= htmlspecialchars($colName) ?>', '<?= htmlspecialchars($cell ?? '') ?>')">
                                             <?= ($cell === null) ? '<span class="text-slate-600 italic">NULL</span>' : htmlspecialchars($cell) ?>
                                         </td>
                                     <?php $colIndex++; endforeach; ?>
@@ -503,8 +543,8 @@ if ($currentTable) {
 
         <div id="mobileToolsOverlay" class="fixed inset-0 bg-black/60 z-[65] hidden backdrop-blur-sm" onclick="toggleMobileTools()"></div>
         
-        <div id="mobileToolsSheet" class="fixed inset-x-0 bottom-0 z-[70] translate-y-full transition-transform duration-300 ease-out bg-[#1e293b] rounded-t-2xl shadow-[0_-10px_40px_rgba(0,0,0,0.5)] border-t border-slate-700 flex flex-col max-h-[85vh]">
-            <div class="p-5 border-b border-slate-700 flex justify-between items-center bg-slate-800/50 rounded-t-2xl">
+        <div id="mobileToolsSheet" class="fixed inset-x-0 bottom-0 z-[70] translate-y-full transition-transform duration-300 ease-out bg-[#1e293b] rounded-t-3xl shadow-[0_-10px_40px_rgba(0,0,0,0.5)] border-t border-slate-700 flex flex-col max-h-[85vh]">
+            <div class="p-5 border-b border-slate-700 flex justify-between items-center bg-slate-800/50 rounded-t-3xl">
                 <h3 class="font-bold text-white text-lg"><i class="fa-solid fa-sliders text-theme mr-2"></i> Alat Tabel</h3>
                 <button onclick="toggleMobileTools()" class="text-slate-400 p-2 hover:text-red-400 bg-slate-800 rounded-lg"><i class="fa-solid fa-xmark fa-lg"></i></button>
             </div>
@@ -528,10 +568,68 @@ if ($currentTable) {
                 </div>
             </div>
         </div>
-
     </main>
 
     <script>
+        // --- LOGIKA MOBILE SEARCH BAR (BUTTON TO INPUT) ---
+        function toggleMobileSearch(show) {
+            const normal = document.getElementById('mobileHeaderNormal');
+            const search = document.getElementById('mobileHeaderSearch');
+            const input = document.getElementById('globalSearchMobile');
+            
+            if (show) {
+                normal.classList.add('hidden'); normal.classList.remove('flex');
+                search.classList.remove('hidden'); search.classList.add('flex');
+                input.focus();
+            } else {
+                search.classList.add('hidden'); search.classList.remove('flex');
+                normal.classList.remove('hidden'); normal.classList.add('flex');
+                input.value = ''; executeSearch(''); // Reset filter
+            }
+        }
+
+        // --- LOGIKA AKSESIBILITAS (FONT & DENSITY) ---
+        function updateA11yUI() {
+            const fs = localStorage.getItem('voidDbFontSize') || '16';
+            const dens = JSON.parse(localStorage.getItem('voidDbDensity')) || {py: '0.75rem', px: '1.25rem'};
+            
+            // Reset font buttons
+            ['font14', 'font16', 'font18'].forEach(id => {
+                document.getElementById(id).className = 'flex-1 py-1.5 rounded-md text-xs font-bold transition-colors text-slate-400 hover:text-white';
+            });
+            document.getElementById('font' + fs).className = 'flex-1 py-1.5 rounded-md text-xs font-bold transition-colors bg-theme text-white shadow-sm';
+
+            // Reset density buttons
+            ['denseTight', 'denseNormal', 'denseLoose'].forEach(id => {
+                document.getElementById(id).className = 'flex-1 py-1.5 rounded-md text-xs font-bold transition-colors text-slate-400 hover:text-white';
+            });
+            
+            let densId = 'denseNormal';
+            if (dens.py === '0.35rem') densId = 'denseTight';
+            else if (dens.py === '1.25rem') densId = 'denseLoose';
+            document.getElementById(densId).className = 'flex-1 py-1.5 rounded-md text-xs font-bold transition-colors bg-theme text-white shadow-sm';
+        }
+
+        function setA11y(type, val) {
+            if (type === 'font') {
+                document.documentElement.style.setProperty('--app-font-scale', val + 'px');
+                localStorage.setItem('voidDbFontSize', val);
+            } else if (type === 'density') {
+                let py = '0.75rem', px = '1.25rem';
+                if (val === 'tight') { py = '0.35rem'; px = '0.75rem'; }
+                else if (val === 'loose') { py = '1.25rem'; px = '1.5rem'; }
+                document.documentElement.style.setProperty('--cell-py', py);
+                document.documentElement.style.setProperty('--cell-px', px);
+                localStorage.setItem('voidDbDensity', JSON.stringify({py, px}));
+            }
+            updateA11yUI();
+        }
+        
+        // Panggil UI update saat load jika ada
+        if(document.getElementById('font16')) updateA11yUI();
+
+
+        // --- LOGIKA UI BAWAAN ---
         function toggleMobileTools() {
             const sheet = document.getElementById('mobileToolsSheet');
             const overlay = document.getElementById('mobileToolsOverlay');
@@ -567,10 +665,6 @@ if ($currentTable) {
         function toggleSettings() {
             const m = document.getElementById('settingsModal');
             m.classList.toggle('hidden'); m.classList.toggle('flex');
-            if(!m.classList.contains('hidden')) {
-                const currentColor = getComputedStyle(document.documentElement).getPropertyValue('--theme-color').trim();
-                document.getElementById('colorPicker').value = currentColor || '#3b82f6';
-            }
         }
 
         function setTheme(hexColor) {
@@ -643,13 +737,11 @@ if ($currentTable) {
             }
         }
 
-        // --- SORTING TABEL UTAMA DENGAN ANIMASI SPIN & POP ---
         function sortTable(n, headerElem) {
             const tbody = document.querySelector("#dataTable tbody");
             const rows = Array.from(tbody.querySelectorAll("tr.data-row"));
             const table = headerElem.closest('table');
             
-            // Reset ikon sort kolom lain
             table.querySelectorAll('th').forEach(th => {
                 if (th !== headerElem) {
                     th.dataset.dir = '';
@@ -658,17 +750,11 @@ if ($currentTable) {
                 }
             });
 
-            let isAsc = headerElem.dataset.dir !== 'asc';
-            headerElem.dataset.dir = isAsc ? 'asc' : 'desc';
-            
-            // Ubah Ikon dan Beri Animasi Spin
+            let isAsc = headerElem.dataset.dir !== 'asc'; headerElem.dataset.dir = isAsc ? 'asc' : 'desc';
             const icon = headerElem.querySelector('i.sort-icon-main');
             if(icon) {
                 icon.className = isAsc ? 'fa-solid fa-sort-up text-theme opacity-100 sort-icon-main spin-anim' : 'fa-solid fa-sort-down text-theme opacity-100 sort-icon-main spin-anim';
-                // Trik agar animasi bisa diputar ulang (re-trigger)
-                icon.classList.remove('spin-anim');
-                void icon.offsetWidth; 
-                icon.classList.add('spin-anim');
+                icon.classList.remove('spin-anim'); void icon.offsetWidth; icon.classList.add('spin-anim');
             }
 
             rows.sort((a, b) => {
@@ -681,7 +767,6 @@ if ($currentTable) {
             rows.forEach(row => tbody.appendChild(row));
         }
 
-        // --- SORTING TABEL INSPECTOR DENGAN ANIMASI SPIN & POP ---
         function sortInspectorTable(headerElem, n) {
             const table = headerElem.closest('table'); const tbody = table.querySelector('tbody');
             const rows = Array.from(tbody.querySelectorAll('tr'));
@@ -690,18 +775,15 @@ if ($currentTable) {
                 if (th !== headerElem) {
                     th.dataset.dir = '';
                     const icon = th.querySelector('i.fa-sort-up, i.fa-sort-down, i.fa-sort');
-                    if(icon) icon.className = 'fa-solid fa-sort opacity-30 group-hover/th:opacity-100 transition-opacity sort-icon-insp';
+                    if(icon) icon.className = 'fa-solid fa-sort opacity-30 group-hover/th:opacity-100 transition-opacity sort-icon-insp text-slate-500';
                 }
             });
 
             let isAsc = headerElem.dataset.dir !== 'asc'; headerElem.dataset.dir = isAsc ? 'asc' : 'desc';
-            
             const icon = headerElem.querySelector('i');
             if(icon) {
                 icon.className = isAsc ? 'fa-solid fa-sort-up text-theme opacity-100 spin-anim' : 'fa-solid fa-sort-down text-theme opacity-100 spin-anim';
-                icon.classList.remove('spin-anim');
-                void icon.offsetWidth; 
-                icon.classList.add('spin-anim');
+                icon.classList.remove('spin-anim'); void icon.offsetWidth; icon.classList.add('spin-anim');
             }
 
             rows.sort((a, b) => {
@@ -722,7 +804,7 @@ if ($currentTable) {
             });
             document.getElementById('rowCount').innerHTML = `<i class="fa-solid fa-chart-simple mr-1"></i> ${count} baris dimuat`;
         };
-        const searchDesk = document.getElementById('globalSearch'); const searchMob = document.getElementById('globalSearchMobile');
+        const searchDesk = document.getElementById('globalSearchDesk'); const searchMob = document.getElementById('globalSearchMobile');
         if(searchDesk) searchDesk.addEventListener('keyup', (e) => executeSearch(e.target.value));
         if(searchMob) searchMob.addEventListener('keyup', (e) => executeSearch(e.target.value));
 
@@ -821,7 +903,7 @@ if ($currentTable) {
                                 <table class="w-full text-left text-sm min-w-max">
                                     <thead class="bg-[#0f172a]/50 text-slate-400 text-xs">
                                         <tr>${keys.map((k, idx) => `
-                                            <th class="px-4 py-3 font-semibold border-b border-slate-700 whitespace-nowrap cursor-pointer hover-text-theme transition-colors group/th" onclick="sortInspectorTable(this, ${idx})">
+                                            <th class="px-4 py-3 font-semibold border-b border-slate-700 whitespace-nowrap cursor-pointer hover-text-theme transition-colors group/th cell-pad" onclick="sortInspectorTable(this, ${idx})">
                                                 <div class="flex items-center justify-between gap-2">
                                                     <span>${k}</span>
                                                     <i class="fa-solid fa-sort opacity-30 group-hover/th:opacity-100 transition-opacity sort-icon-insp text-slate-500"></i>
@@ -833,7 +915,7 @@ if ($currentTable) {
                                         ${group.data.map(row => `
                                             <tr class="hover:bg-slate-700/50 transition-colors group/row">
                                                 ${Object.entries(row).map(([k, v]) => `
-                                                    <td class="px-4 py-3 text-slate-300 cursor-pointer hover-text-theme whitespace-nowrap" onclick="pushTrace('${group.table}', '${k}', '${v}')">
+                                                    <td class="cell-pad text-slate-300 cursor-pointer hover-text-theme whitespace-nowrap" onclick="pushTrace('${group.table}', '${k}', '${v}')">
                                                         ${v !== null ? v : '<span class="text-slate-600 italic">NULL</span>'}
                                                     </td>
                                                 `).join('')}
