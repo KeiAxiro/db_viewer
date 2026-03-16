@@ -43,6 +43,20 @@ if (isset($_GET['action']) && $_GET['action'] === 'disconnect') {
     exit;
 }
 
+// --- PERSIAPAN FOLDER TEMP & AUTO CLEANUP ---
+$tempDir = __DIR__ . '/temp_db';
+if (!is_dir($tempDir)) @mkdir($tempDir, 0777, true);
+// Hapus file yang lebih tua dari 12 jam (43200 detik)
+if ($handle = opendir($tempDir)) {
+    while (false !== ($file = readdir($handle))) {
+        $filepath = $tempDir . '/' . $file;
+        if (is_file($filepath) && time() - filemtime($filepath) > 43200) {
+            @unlink($filepath);
+        }
+    }
+    closedir($handle);
+}
+
 // --- HANDLE CONNECTION FORM SUBMISSION ---
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (isset($_POST['connect_mysql'])) {
@@ -60,14 +74,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!in_array($file_ext, $allowed_exts)) {
             $conn_error = "Upload Gagal: Format file tidak didukung! Harap unggah file .sqlite, .sqlite3, atau .db.";
         } elseif ($file['error'] === UPLOAD_ERR_OK) {
-            $dest = __DIR__ . '/temp_sqlite_' . time() . '.db';
+            $dest = $tempDir . '/upload_' . time() . '_' . basename($file['name']);
             if (!@move_uploaded_file($file['tmp_name'], $dest)) {
-                $dest = sys_get_temp_dir() . '/temp_sqlite_' . time() . '.db';
-                if (!@move_uploaded_file($file['tmp_name'], $dest)) {
-                    $conn_error = "Gagal menyimpan file upload. Pastikan folder memiliki izin Write.";
-                }
-            }
-            if (!isset($conn_error)) {
+                $conn_error = "Gagal menyimpan file upload. Pastikan folder 'temp_db' memiliki izin Write (Chmod 777).";
+            } else {
                 $_SESSION['db_connection'] = ['driver' => 'sqlite', 'file' => $dest, 'dbname' => basename($file['name'])];
                 header("Location: index.php"); exit;
             }
@@ -108,7 +118,13 @@ if ($pdo === null):
         <div class="flex-1 p-6 lg:p-10 border-b lg:border-b-0 lg:border-r border-slate-700 relative">
             <h2 class="text-2xl font-bold text-theme mb-2"><i class="fa-solid fa-server mr-2"></i> MySQL Server</h2>
             <p class="text-sm text-slate-400 mb-6">Hubungkan ke database lokal atau remote.</p>
-            <?php if(isset($conn_error)): ?><div class="bg-red-500/10 border border-red-500 text-red-400 p-3 rounded-lg text-xs mb-4"><i class="fa-solid fa-triangle-exclamation"></i> <?= htmlspecialchars($conn_error) ?></div><?php endif; ?>
+            
+            <?php if(isset($conn_error)): ?>
+                <div class="bg-red-500/10 border border-red-500 text-red-400 p-3 rounded-lg text-xs mb-4">
+                    <i class="fa-solid fa-triangle-exclamation"></i> <?= htmlspecialchars($conn_error) ?>
+                </div>
+            <?php endif; ?>
+
             <form method="POST" class="space-y-4" id="mysqlForm">
                 <input type="hidden" name="connect_mysql" value="1">
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -211,17 +227,32 @@ $tables = $dbManager->getTables();
 $relations = $dbManager->getRelations();
 $currentTable = $_GET['table'] ?? (!empty($tables) ? $tables[0] : null);
 $mode = $_GET['mode'] ?? 'join';
-$query = ""; $rows = [];
+
+$db_error = null;
+$query_status = "ok";
+$rows = [];
+$query = "";
 
 if ($currentTable) {
-    $query = ($mode === 'raw') ? $dbManager->buildRawQuery($currentTable) : $dbManager->buildJoinQuery($currentTable, $relations);
-    $result = $dbManager->fetchData($query);
-    if (!isset($result['error'])) {
-        $rows = $result;
-        if (empty($rows) && $mode === 'join') {
+    if ($mode === 'join') {
+        $joinedQuery = $dbManager->buildJoinQuery($currentTable, $relations);
+        if ($joinedQuery === null) {
             $query = $dbManager->buildRawQuery($currentTable);
-            $rows = $dbManager->fetchData($query);
             $mode = 'raw';
+            $query_status = "no_relation"; // Tabel ini benar-benar tidak punya relasi
+        } else {
+            $query = $joinedQuery;
+        }
+    } else {
+        $query = $dbManager->buildRawQuery($currentTable);
+    }
+
+    if ($query !== "") {
+        $result = $dbManager->fetchData($query);
+        if (isset($result['error'])) {
+            $db_error = $result['error'];
+        } else {
+            $rows = $result;
         }
     }
 }
@@ -239,23 +270,15 @@ if ($currentTable) {
         @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
         
         :root { 
-            /* THEME & A11Y VARIABLES */
-            --theme-color: <?= $themeColor ?>; 
-            --theme-color-hover: <?= $themeHover ?>; 
-            --theme-bg-subtle: <?= $themeSubtle ?>; 
+            --theme-color: <?= $themeColor ?>; --theme-color-hover: <?= $themeHover ?>; --theme-bg-subtle: <?= $themeSubtle ?>; 
             --bg-base: #0f172a; --bg-panel: #1e293b; --border-color: #334155; 
-            
-            /* Variabel Aksesibilitas (Diubah via JS) */
-            --app-font-scale: 16px;
-            --cell-py: 0.75rem; 
-            --cell-px: 1.25rem;
+            --app-font-scale: 16px; --cell-py: 0.75rem; --cell-px: 1.25rem;
         }
         
-        html { font-size: var(--app-font-scale); } /* Global Font Scaling */
+        html { font-size: var(--app-font-scale); }
 
         body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: var(--bg-base); color: #e2e8f0; }
         .font-mono { font-family: 'JetBrains Mono', monospace; }
-        
         .text-theme { color: var(--theme-color) !important; }
         .bg-theme { background-color: var(--theme-color) !important; color: white !important;}
         .border-theme { border-color: var(--theme-color) !important; }
@@ -268,11 +291,8 @@ if ($currentTable) {
         ::-webkit-scrollbar-thumb:hover { background: var(--theme-color); }
         
         th { position: sticky; top: 0; z-index: 20; }
-        
-        /* Table Dynamic Padding */
         .cell-pad { padding: var(--cell-py) var(--cell-px) !important; }
 
-        /* Animasi Spin & Pop Untuk Sorting */
         @keyframes spin-anim { 0% { transform: rotate(-180deg) scale(0.5); opacity: 0; } 100% { transform: rotate(0deg) scale(1); opacity: 1; } }
         .spin-anim { animation: spin-anim 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
         
@@ -428,7 +448,7 @@ if ($currentTable) {
                 <a href="?action=disconnect" class="text-red-400 hover:text-red-300 transition-colors p-2 rounded-lg hover:bg-red-900/30 mt-2" title="Disconnect"><i class="fa-solid fa-power-off fa-xl"></i></a>
             </div>
         </div>
-        <div class="flex-1 overflow-y-auto py-4 space-y-1 hide-on-collapse">
+        <div class="flex-1 overflow-y-auto py-4 space-y-1 hide-on-collapse flex flex-col">
             <div class="px-5 mb-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest flex items-center justify-between">
                 <span>Daftar Tabel</span><span class="bg-slate-800 px-1.5 py-0.5 rounded text-slate-400"><?= count($tables) ?></span>
             </div>
@@ -438,6 +458,14 @@ if ($currentTable) {
                     <span class="truncate"><?= htmlspecialchars($t) ?></span>
                 </a>
             <?php endforeach; ?>
+            
+            <div class="px-5 mt-auto pt-4 border-t border-slate-700">
+                <p class="text-[10px] text-slate-500 uppercase font-bold tracking-widest mb-2">Metadata Stats</p>
+                <div class="flex items-center justify-between text-[11px] text-slate-400">
+                    <span>Relasi Terdeteksi:</span>
+                    <span class="font-mono text-theme"><?= count($relations) ?></span>
+                </div>
+            </div>
         </div>
     </aside>
 
@@ -490,6 +518,25 @@ if ($currentTable) {
                 </div>
             </div>
         </header>
+
+        <?php if (isset($db_error)): ?>
+            <div class="px-4 md:px-6 pt-4 z-10 relative">
+                <div class="bg-red-500/10 border border-red-500/50 text-red-400 p-4 rounded-xl flex items-start gap-3 shadow-lg">
+                    <i class="fa-solid fa-triangle-exclamation text-xl mt-0.5"></i>
+                    <div>
+                        <h4 class="font-bold text-sm">Query Terhenti (Database Error)</h4>
+                        <p class="text-xs mt-1 font-mono opacity-80"><?= htmlspecialchars($db_error) ?></p>
+                    </div>
+                </div>
+            </div>
+        <?php elseif ($query_status === "no_relation"): ?>
+            <div class="px-4 md:px-6 pt-4 z-10 relative">
+                <div class="bg-amber-500/10 border border-amber-500/50 text-amber-500 px-4 py-3 rounded-xl text-xs flex items-center gap-3 shadow-lg">
+                    <i class="fa-solid fa-circle-info fa-lg"></i>
+                    <span>Tabel ini tidak memiliki <b>Foreign Key</b> (kolom relasi) ke tabel lain. Mode otomatis dikembalikan ke <b>Raw</b>.</span>
+                </div>
+            </div>
+        <?php endif; ?>
 
         <div class="p-4 md:p-6 flex-1 min-h-0 relative flex flex-col z-10">
             <div class="overflow-auto rounded-xl border border-slate-700 bg-[#1e293b] shadow-lg relative flex-1">
@@ -571,7 +618,6 @@ if ($currentTable) {
     </main>
 
     <script>
-        // --- LOGIKA MOBILE SEARCH BAR (BUTTON TO INPUT) ---
         function toggleMobileSearch(show) {
             const normal = document.getElementById('mobileHeaderNormal');
             const search = document.getElementById('mobileHeaderSearch');
@@ -588,21 +634,14 @@ if ($currentTable) {
             }
         }
 
-        // --- LOGIKA AKSESIBILITAS (FONT & DENSITY) ---
         function updateA11yUI() {
             const fs = localStorage.getItem('voidDbFontSize') || '16';
             const dens = JSON.parse(localStorage.getItem('voidDbDensity')) || {py: '0.75rem', px: '1.25rem'};
             
-            // Reset font buttons
-            ['font14', 'font16', 'font18'].forEach(id => {
-                document.getElementById(id).className = 'flex-1 py-1.5 rounded-md text-xs font-bold transition-colors text-slate-400 hover:text-white';
-            });
+            ['font14', 'font16', 'font18'].forEach(id => { document.getElementById(id).className = 'flex-1 py-1.5 rounded-md text-xs font-bold transition-colors text-slate-400 hover:text-white'; });
             document.getElementById('font' + fs).className = 'flex-1 py-1.5 rounded-md text-xs font-bold transition-colors bg-theme text-white shadow-sm';
 
-            // Reset density buttons
-            ['denseTight', 'denseNormal', 'denseLoose'].forEach(id => {
-                document.getElementById(id).className = 'flex-1 py-1.5 rounded-md text-xs font-bold transition-colors text-slate-400 hover:text-white';
-            });
+            ['denseTight', 'denseNormal', 'denseLoose'].forEach(id => { document.getElementById(id).className = 'flex-1 py-1.5 rounded-md text-xs font-bold transition-colors text-slate-400 hover:text-white'; });
             
             let densId = 'denseNormal';
             if (dens.py === '0.35rem') densId = 'denseTight';
@@ -625,11 +664,8 @@ if ($currentTable) {
             updateA11yUI();
         }
         
-        // Panggil UI update saat load jika ada
         if(document.getElementById('font16')) updateA11yUI();
 
-
-        // --- LOGIKA UI BAWAAN ---
         function toggleMobileTools() {
             const sheet = document.getElementById('mobileToolsSheet');
             const overlay = document.getElementById('mobileToolsOverlay');
@@ -665,6 +701,10 @@ if ($currentTable) {
         function toggleSettings() {
             const m = document.getElementById('settingsModal');
             m.classList.toggle('hidden'); m.classList.toggle('flex');
+            if(!m.classList.contains('hidden')) {
+                const currentColor = getComputedStyle(document.documentElement).getPropertyValue('--theme-color').trim();
+                document.getElementById('colorPicker').value = currentColor || '#3b82f6';
+            }
         }
 
         function setTheme(hexColor) {
