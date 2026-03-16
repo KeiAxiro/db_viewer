@@ -3,7 +3,23 @@
 require_once 'config.php';
 require_once 'DatabaseManager.php';
 
-// --- HANDLE AJAX GET DATABASES (TANPA LOGIN FULL) ---
+// --- HANDLE THEME SAVE (GLOBAL SESSION) ---
+if (isset($_GET['action']) && $_GET['action'] === 'save_theme') {
+    $_SESSION['theme_color'] = $_POST['color'];
+    $_SESSION['theme_color_hover'] = $_POST['hover'];
+    echo json_encode(['success' => true]);
+    exit;
+}
+
+// --- PERSIAPAN VARIABEL TEMA GLOBAL ---
+$themeColor = $_SESSION['theme_color'] ?? '#3b82f6';
+$themeHover = $_SESSION['theme_color_hover'] ?? '#2563eb';
+$hex = ltrim($themeColor, '#');
+if (strlen($hex) == 3) $hex = str_repeat(substr($hex,0,1), 2) . str_repeat(substr($hex,1,1), 2) . str_repeat(substr($hex,2,1), 2);
+list($r, $g, $b) = sscanf($hex, "%02x%02x%02x");
+$themeSubtle = "rgba($r, $g, $b, 0.15)";
+
+// --- HANDLE AJAX GET DATABASES ---
 if (isset($_GET['action']) && $_GET['action'] === 'get_dbs') {
     header('Content-Type: application/json');
     try {
@@ -14,7 +30,6 @@ if (isset($_GET['action']) && $_GET['action'] === 'get_dbs') {
         $tempPdo = new PDO("mysql:host=$host;charset=utf8mb4", $user, $pass);
         $tempPdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
         $dbs = $tempPdo->query("SHOW DATABASES")->fetchAll(PDO::FETCH_COLUMN);
-        
         echo json_encode(['success' => true, 'dbs' => $dbs]);
     } catch (Exception $e) {
         echo json_encode(['success' => false, 'message' => $e->getMessage()]);
@@ -24,7 +39,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'get_dbs') {
 
 // --- HANDLE DISCONNECT ---
 if (isset($_GET['action']) && $_GET['action'] === 'disconnect') {
-    session_destroy();
+    unset($_SESSION['db_connection']); 
     header("Location: index.php");
     exit;
 }
@@ -43,16 +58,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
     } elseif (isset($_POST['connect_sqlite']) && isset($_FILES['sqlite_file'])) {
         $file = $_FILES['sqlite_file'];
-        
         if ($file['error'] === UPLOAD_ERR_OK) {
             $dest = __DIR__ . '/temp_sqlite_' . time() . '.db';
             if (!@move_uploaded_file($file['tmp_name'], $dest)) {
                 $dest = sys_get_temp_dir() . '/temp_sqlite_' . time() . '.db';
                 if (!@move_uploaded_file($file['tmp_name'], $dest)) {
-                    $conn_error = "Gagal menyimpan file upload. Pastikan folder server memiliki izin Write.";
+                    $conn_error = "Gagal menyimpan file upload. Pastikan folder memiliki izin Write.";
                 }
             }
-
             if (!isset($conn_error)) {
                 $_SESSION['db_connection'] = [
                     'driver' => 'sqlite',
@@ -63,17 +76,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 exit;
             }
         } else {
-            $errCodes = [
-                UPLOAD_ERR_INI_SIZE => 'Ukuran file melebihi batas upload_max_filesize di php.ini.',
-                UPLOAD_ERR_PARTIAL => 'File hanya terupload sebagian.',
-                UPLOAD_ERR_NO_FILE => 'Tidak ada file yang diupload.'
-            ];
+            $errCodes = [ UPLOAD_ERR_INI_SIZE => 'Ukuran file melebihi batas php.ini.', UPLOAD_ERR_PARTIAL => 'Terupload sebagian.', UPLOAD_ERR_NO_FILE => 'Tidak ada file.' ];
             $conn_error = "Upload Gagal: " . ($errCodes[$file['error']] ?? "Error Code {$file['error']}");
         }
     }
 }
 
-// --- TAMPILAN LOGIN / KONEKSI ---
+// ==========================================
+// TAMPILAN LOGIN / KONEKSI
+// ==========================================
 if ($pdo === null):
 ?>
 <!DOCTYPE html>
@@ -86,15 +97,24 @@ if ($pdo === null):
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+        :root {
+            --theme-color: <?= $themeColor ?>;
+            --theme-color-hover: <?= $themeHover ?>;
+            --theme-bg-subtle: <?= $themeSubtle ?>;
+        }
         body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #0f172a; color: #e2e8f0; }
+        .text-theme { color: var(--theme-color) !important; }
+        .bg-theme { background-color: var(--theme-color) !important; color: white !important; }
+        .border-theme { border-color: var(--theme-color) !important; }
+        .hover-bg-theme:hover { background-color: var(--theme-color-hover) !important; color: white !important; }
         .glass-card { background: rgba(30, 41, 59, 0.8); backdrop-filter: blur(20px); border: 1px solid #334155; }
+        select option { background-color: #0f172a; color: #e2e8f0; padding: 10px; }
     </style>
 </head>
-<body class="h-screen w-full flex items-center justify-center p-4 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')]">
-    <div class="glass-card max-w-4xl w-full rounded-2xl shadow-2xl overflow-hidden flex flex-col md:flex-row h-auto max-h-[90vh]">
-        
-        <div class="flex-1 p-8 border-b md:border-b-0 md:border-r border-slate-700 relative overflow-y-auto">
-            <h2 class="text-2xl font-bold text-blue-500 mb-2"><i class="fa-solid fa-server mr-2"></i> MySQL Server</h2>
+<body class="min-h-screen w-full flex items-center justify-center p-4 lg:p-8 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] overflow-y-auto selection:bg-theme selection:text-white">
+    <div class="glass-card max-w-5xl w-full rounded-2xl shadow-2xl overflow-hidden flex flex-col lg:flex-row h-auto">
+        <div class="flex-1 p-6 lg:p-10 border-b lg:border-b-0 lg:border-r border-slate-700 relative">
+            <h2 class="text-2xl font-bold text-theme mb-2"><i class="fa-solid fa-server mr-2"></i> MySQL Server</h2>
             <p class="text-sm text-slate-400 mb-6">Hubungkan ke database lokal atau remote.</p>
             
             <?php if(isset($conn_error)): ?>
@@ -105,51 +125,41 @@ if ($pdo === null):
 
             <form method="POST" class="space-y-4" id="mysqlForm">
                 <input type="hidden" name="connect_mysql" value="1">
-                <div class="grid grid-cols-2 gap-4">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                         <label class="block text-xs font-bold text-slate-400 mb-1">Host</label>
-                        <input type="text" name="host" id="host" value="localhost" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-sm focus:border-blue-500 outline-none">
+                        <input type="text" name="host" id="host" value="localhost" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-sm outline-none focus:border-theme transition-colors">
                     </div>
                     <div>
                         <label class="block text-xs font-bold text-slate-400 mb-1">User</label>
-                        <input type="text" name="user" id="user" value="root" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-sm focus:border-blue-500 outline-none">
+                        <input type="text" name="user" id="user" value="root" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-sm outline-none focus:border-theme transition-colors">
                     </div>
                 </div>
                 <div>
                     <label class="block text-xs font-bold text-slate-400 mb-1">Password</label>
-                    <input type="password" name="pass" id="pass" placeholder="(Kosongkan jika XAMPP)" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-sm focus:border-blue-500 outline-none">
+                    <input type="password" name="pass" id="pass" placeholder="(Kosongkan jika XAMPP)" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-sm outline-none focus:border-theme transition-colors">
                 </div>
                 <div>
                     <div class="flex justify-between items-end mb-1">
-                        <label class="block text-xs font-bold text-blue-400">Pilih Database</label>
-                        <button type="button" onclick="loadDatabases()" id="btnLoadDb" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded transition-colors"><i class="fa-solid fa-rotate mr-1"></i> Load List</button>
+                        <label class="block text-xs font-bold text-theme">Pilih Database</label>
+                        <button type="button" onclick="loadDatabases()" id="btnLoadDb" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded-md transition-colors"><i class="fa-solid fa-rotate mr-1"></i> Load List</button>
                     </div>
-                    
-                    <input type="text" name="dbname" id="dbInput" value="db_voidbraver" required class="w-full bg-blue-900/20 border border-blue-500/50 rounded-lg px-4 py-2 text-sm focus:border-blue-500 outline-none text-blue-300 font-bold tracking-wide">
-                    <select id="dbSelect" class="w-full bg-blue-900/20 border border-blue-500/50 rounded-lg px-4 py-2 text-sm focus:border-blue-500 outline-none text-blue-300 font-bold hidden"></select>
+                    <input type="text" name="dbname" id="dbInput" value="db_voidbraver" required class="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-sm outline-none text-theme font-bold tracking-wide focus:border-theme transition-colors">
+                    <select id="dbSelect" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-sm outline-none text-theme font-bold cursor-pointer hidden focus:border-theme transition-colors"></select>
                 </div>
-                <button type="submit" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-4 rounded-lg transition-colors mt-2">
+                <button type="submit" class="w-full bg-theme hover-bg-theme font-bold py-3 px-4 rounded-xl transition-colors mt-4 shadow-lg shadow-black/20">
                     Connect MySQL <i class="fa-solid fa-arrow-right ml-1"></i>
                 </button>
             </form>
         </div>
-
-        <div class="flex-1 p-8 bg-slate-800/50 flex flex-col justify-center">
+        <div class="flex-1 p-6 lg:p-10 bg-slate-800/50 flex flex-col justify-center">
             <h2 class="text-2xl font-bold text-emerald-500 mb-2"><i class="fa-solid fa-file-code mr-2"></i> SQLite File</h2>
             <p class="text-sm text-slate-400 mb-6">Unggah file .sqlite atau .db untuk diinspeksi.</p>
-            
-            <form method="POST" enctype="multipart/form-data" class="flex flex-col h-full" id="sqliteForm">
+            <form method="POST" enctype="multipart/form-data" class="flex flex-col flex-1" id="sqliteForm">
                 <input type="hidden" name="connect_sqlite" value="1">
-                
                 <div class="flex-1 border-2 border-dashed border-slate-600 rounded-xl flex flex-col items-center justify-center p-8 text-center hover:border-emerald-500 hover:bg-emerald-500/5 transition-colors group cursor-pointer relative min-h-[250px]">
                     <input type="file" name="sqlite_file" accept=".sqlite,.db,.sqlite3" required class="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" 
-                    onchange="
-                        document.getElementById('uploadIcon').className = 'fa-solid fa-circle-notch fa-spin text-5xl text-emerald-500 mb-4'; 
-                        document.getElementById('fileName').innerText = 'Memuat Database...'; 
-                        document.getElementById('fileDesc').innerText = 'Mohon tunggu sebentar';
-                        this.form.submit();
-                    ">
-                    
+                    onchange="document.getElementById('uploadIcon').className = 'fa-solid fa-circle-notch fa-spin text-5xl text-emerald-500 mb-4'; document.getElementById('fileName').innerText = 'Memuat Database...'; document.getElementById('fileDesc').innerText = 'Mohon tunggu sebentar'; this.form.submit();">
                     <i id="uploadIcon" class="fa-solid fa-cloud-arrow-up text-5xl text-slate-500 group-hover:text-emerald-500 mb-4 transition-colors"></i>
                     <p class="text-base font-bold text-slate-300 group-hover:text-emerald-400" id="fileName">Klik atau Drop file SQLite ke sini</p>
                     <p class="text-sm text-slate-500 mt-2" id="fileDesc">Langsung otomatis terbuka</p>
@@ -157,49 +167,30 @@ if ($pdo === null):
             </form>
         </div>
     </div>
-
     <script>
         async function loadDatabases() {
             const btn = document.getElementById('btnLoadDb');
-            const host = document.getElementById('host').value;
-            const user = document.getElementById('user').value;
-            const pass = document.getElementById('pass').value;
-            
             btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Loading...';
-            
             const formData = new FormData();
-            formData.append('host', host);
-            formData.append('user', user);
-            formData.append('pass', pass);
-
+            formData.append('host', document.getElementById('host').value); 
+            formData.append('user', document.getElementById('user').value); 
+            formData.append('pass', document.getElementById('pass').value);
             try {
                 const res = await fetch('?action=get_dbs', { method: 'POST', body: formData });
                 const data = await res.json();
-                
                 if (data.success) {
                     const select = document.getElementById('dbSelect');
-                    select.innerHTML = '';
-                    let foundVoid = false;
+                    select.innerHTML = ''; let foundVoid = false;
                     data.dbs.forEach(db => {
-                        const opt = document.createElement('option');
-                        opt.value = db;
-                        opt.innerText = db;
+                        const opt = document.createElement('option'); opt.value = db; opt.innerText = db;
                         if (db === 'db_voidbraver') { opt.selected = true; foundVoid = true; }
                         select.appendChild(opt);
                     });
-                    
                     if(!foundVoid && data.dbs.length > 0) select.selectedIndex = 0;
-                    
-                    select.classList.remove('hidden');
-                    document.getElementById('dbInput').classList.add('hidden');
-                    document.getElementById('dbInput').name = '';
-                    select.name = 'dbname'; 
-                } else {
-                    alert("Koneksi gagal: " + data.message);
-                }
-            } catch (e) {
-                alert("Error: " + e.message);
-            }
+                    select.classList.remove('hidden'); document.getElementById('dbInput').classList.add('hidden');
+                    document.getElementById('dbInput').name = ''; select.name = 'dbname'; 
+                } else alert("Koneksi gagal: " + data.message);
+            } catch (e) { alert("Error: " + e.message); }
             btn.innerHTML = '<i class="fa-solid fa-rotate"></i> Load List';
         }
     </script>
@@ -209,8 +200,10 @@ if ($pdo === null):
 exit; 
 endif; 
 
-// --- DASHBOARD UTAMA (SETELAH LOGIN) ---
-
+// ==========================================
+// DASHBOARD UTAMA (SETELAH KONEKSI BERHASIL)
+// ==========================================
+$sessionConn = $_SESSION['db_connection'] ?? null;
 $dbManager = new DatabaseManager($pdo, $dbname, $driver);
 
 if (isset($_GET['action']) && $_GET['action'] === 'trace') {
@@ -220,21 +213,16 @@ if (isset($_GET['action']) && $_GET['action'] === 'trace') {
         $traceMode = $_GET['trace_mode'] ?? 'raw';
         $res = $dbManager->traceValueAdvanced($_GET['table'], $_GET['col'], $_GET['val'], $traceMode);
         echo json_encode(['error' => false, 'data' => $res]);
-    } catch (Exception $e) {
-        echo json_encode(['error' => true, 'message' => $e->getMessage()]);
-    }
+    } catch (Exception $e) { echo json_encode(['error' => true, 'message' => $e->getMessage()]); }
     exit;
 }
 
 if (isset($_GET['action']) && ($_GET['action'] === 'sqlite' || $_GET['action'] === 'sqlite_all')) {
-    $file = ($_GET['action'] === 'sqlite_all') 
-            ? $dbManager->exportFullDatabaseToSQLite() : $dbManager->exportToSQLite($_GET['table']);
+    $file = ($_GET['action'] === 'sqlite_all') ? $dbManager->exportFullDatabaseToSQLite() : $dbManager->exportToSQLite($_GET['table']);
     if ($file && file_exists($file)) {
         $filename = ($_GET['action'] === 'sqlite_all') ? "{$dbname}_FULL_Backup.sqlite" : "{$_GET['table']}_backup.sqlite";
-        header('Content-Description: File Transfer');
-        header('Content-Type: application/x-sqlite3');
-        header('Content-Disposition: attachment; filename="'.$filename.'"');
-        header('Content-Length: ' . filesize($file));
+        header('Content-Description: File Transfer'); header('Content-Type: application/x-sqlite3');
+        header('Content-Disposition: attachment; filename="'.$filename.'"'); header('Content-Length: ' . filesize($file));
         readfile($file); unlink($file); exit;
     }
     die("Gagal mengekspor data.");
@@ -242,11 +230,9 @@ if (isset($_GET['action']) && ($_GET['action'] === 'sqlite' || $_GET['action'] =
 
 $tables = $dbManager->getTables();
 $relations = $dbManager->getRelations();
-
 $currentTable = $_GET['table'] ?? (!empty($tables) ? $tables[0] : null);
 $mode = $_GET['mode'] ?? 'join';
-$query = "";
-$rows = [];
+$query = ""; $rows = [];
 
 if ($currentTable) {
     $query = ($mode === 'raw') ? $dbManager->buildRawQuery($currentTable) : $dbManager->buildJoinQuery($currentTable, $relations);
@@ -272,49 +258,81 @@ if ($currentTable) {
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
-        :root { --theme-color: #3b82f6; --theme-color-hover: #2563eb; --theme-bg-subtle: rgba(59, 130, 246, 0.1); --bg-base: #0f172a; --bg-panel: #1e293b; --border-color: #334155; }
+        :root { 
+            --theme-color: <?= $themeColor ?>; 
+            --theme-color-hover: <?= $themeHover ?>; 
+            --theme-bg-subtle: <?= $themeSubtle ?>; 
+            --bg-base: #0f172a; --bg-panel: #1e293b; --border-color: #334155; 
+        }
         body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: var(--bg-base); color: #e2e8f0; }
         .font-mono { font-family: 'JetBrains Mono', monospace; }
         .text-theme { color: var(--theme-color) !important; }
-        .bg-theme { background-color: var(--theme-color) !important; }
+        .bg-theme { background-color: var(--theme-color) !important; color: white !important;}
         .border-theme { border-color: var(--theme-color) !important; }
         .hover-text-theme:hover { color: var(--theme-color) !important; }
+        .hover-bg-theme:hover { background-color: var(--theme-color-hover) !important; color: white !important; }
+        
         ::-webkit-scrollbar { width: 6px; height: 6px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: #475569; border-radius: 10px; }
         ::-webkit-scrollbar-thumb:hover { background: var(--theme-color); }
-        .table-wrapper { height: calc(100vh - 200px); }
+        
+        .table-wrapper { height: calc(100vh - 180px); }
         th { position: sticky; top: 0; z-index: 20; }
+        
         .sort-icon { opacity: 0.2; transition: all 0.2s; font-size: 0.7rem; margin-left: 6px; }
         th.asc .sort-icon { opacity: 1; color: var(--theme-color); transform: rotate(180deg); }
         th.desc .sort-icon { opacity: 1; color: var(--theme-color); }
+        
         td { transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); position: relative; }
         td:hover { background: var(--theme-bg-subtle); color: var(--theme-color); cursor: pointer; }
         td::after { content: "\f002 Inspect"; font-family: 'Plus Jakarta Sans', 'Font Awesome 6 Free'; font-weight: 700; position: absolute; bottom: calc(100% + 4px); left: 50%; transform: translateX(-50%) translateY(5px); background: var(--theme-color); color: white; padding: 4px 10px; border-radius: 6px; font-size: 11px; opacity: 0; visibility: hidden; pointer-events: none; transition: all 0.2s ease; white-space: nowrap; z-index: 50; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.3); }
         td::before { content: ""; position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%) translateY(5px); border-width: 4px; border-style: solid; border-color: var(--theme-color) transparent transparent transparent; opacity: 0; visibility: hidden; transition: all 0.2s ease; z-index: 50; }
         td:hover::after, td:hover::before { opacity: 1; visibility: visible; transform: translateX(-50%) translateY(0); }
-        .glass-panel { background: rgba(30, 41, 59, 0.95); backdrop-filter: blur(16px); border: 1px solid var(--border-color); }
+        
+        .glass-panel { background: rgba(30, 41, 59, 0.95); backdrop-filter: blur(20px); border: 1px solid var(--border-color); }
         .sidebar-link.active { background: var(--theme-bg-subtle); border-right: 3px solid var(--theme-color); color: var(--theme-color); font-weight: 600; }
+
+        .sidebar-collapsed { width: 5rem !important; }
+        .sidebar-collapsed .hide-on-collapse { display: none !important; }
+        .sidebar-collapsed .show-on-collapse { display: flex !important; }
+        .sidebar-collapsed .center-on-collapse { justify-content: center !important; padding-left: 0; padding-right: 0; }
     </style>
     <style id="dynamicPinStyle"></style>
 </head>
-<body class="flex overflow-hidden antialiased">
+<body class="flex h-screen overflow-hidden antialiased selection:bg-theme selection:text-white">
 
-    <div id="settingsModal" class="fixed inset-0 z-[60] hidden items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm transition-opacity">
+    <div id="settingsModal" class="fixed inset-0 z-[120] hidden items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm transition-opacity">
         <div class="bg-[#1e293b] border border-slate-700 w-full max-w-md rounded-xl shadow-2xl flex flex-col overflow-hidden">
             <div class="p-5 border-b border-slate-700/50 flex justify-between items-center bg-slate-800/50">
                 <h3 class="text-lg font-bold text-white flex items-center gap-2"><i class="fa-solid fa-gear text-slate-400"></i> Konfigurasi Sistem</h3>
                 <button onclick="toggleSettings()" class="text-slate-400 hover:text-red-400"><i class="fa-solid fa-xmark fa-lg"></i></button>
             </div>
             <div class="p-6 space-y-6">
+                <?php if ($driver === 'mysql' && $sessionConn): ?>
+                <div>
+                    <label class="text-xs text-slate-400 block mb-2 uppercase font-bold tracking-wider"><i class="fa-solid fa-user mr-1"></i> Informasi Profil</label>
+                    <div class="bg-slate-900/50 border border-slate-700 rounded-lg p-3 text-sm text-slate-300 font-mono shadow-inner">
+                        <p><span class="text-slate-500 mr-2">Host:</span> <?= htmlspecialchars($sessionConn['host']) ?></p>
+                        <p><span class="text-slate-500 mr-2">User:</span> <?= htmlspecialchars($sessionConn['user']) ?></p>
+                        <p><span class="text-slate-500 mr-2">Tipe:</span> MySQL DB</p>
+                    </div>
+                </div>
+                <?php endif; ?>
                 <div>
                     <label class="text-xs text-slate-400 block mb-3 uppercase font-bold tracking-wider"><i class="fa-solid fa-palette mr-1"></i> Aksen Warna Tema</label>
-                    <div class="flex gap-4">
-                        <button onclick="setTheme('blue', '#3b82f6', '#2563eb')" class="w-10 h-10 rounded-full bg-blue-500 hover:scale-110 ring-2 ring-transparent focus:ring-blue-300"></button>
-                        <button onclick="setTheme('emerald', '#10b981', '#059669')" class="w-10 h-10 rounded-full bg-emerald-500 hover:scale-110 ring-2 ring-transparent focus:ring-emerald-300"></button>
-                        <button onclick="setTheme('violet', '#8b5cf6', '#7c3aed')" class="w-10 h-10 rounded-full bg-violet-500 hover:scale-110 ring-2 ring-transparent focus:ring-violet-300"></button>
-                        <button onclick="setTheme('rose', '#f43f5e', '#e11d48')" class="w-10 h-10 rounded-full bg-rose-500 hover:scale-110 ring-2 ring-transparent focus:ring-rose-300"></button>
-                        <button onclick="setTheme('amber', '#f59e0b', '#d97706')" class="w-10 h-10 rounded-full bg-amber-500 hover:scale-110 ring-2 ring-transparent focus:ring-amber-300"></button>
+                    <div class="flex flex-wrap gap-3 items-center">
+                        <button onclick="setTheme('#3b82f6')" class="w-8 h-8 rounded-full bg-blue-500 hover:scale-110 transition-transform shadow-md"></button>
+                        <button onclick="setTheme('#10b981')" class="w-8 h-8 rounded-full bg-emerald-500 hover:scale-110 transition-transform shadow-md"></button>
+                        <button onclick="setTheme('#8b5cf6')" class="w-8 h-8 rounded-full bg-violet-500 hover:scale-110 transition-transform shadow-md"></button>
+                        <button onclick="setTheme('#f43f5e')" class="w-8 h-8 rounded-full bg-rose-500 hover:scale-110 transition-transform shadow-md"></button>
+                        <button onclick="setTheme('#f59e0b')" class="w-8 h-8 rounded-full bg-amber-500 hover:scale-110 transition-transform shadow-md"></button>
+                        <button onclick="setTheme('#06b6d4')" class="w-8 h-8 rounded-full bg-cyan-500 hover:scale-110 transition-transform shadow-md"></button>
+                        <div class="h-6 w-px bg-slate-700 mx-1"></div>
+                        <div class="flex items-center gap-2 bg-slate-800 p-1.5 rounded-lg border border-slate-700 hover:border-slate-500 transition-colors">
+                            <label for="colorPicker" class="text-xs font-bold text-slate-400 cursor-pointer pl-1"><i class="fa-solid fa-eye-dropper"></i> Custom</label>
+                            <input type="color" id="colorPicker" value="<?= $themeColor ?>" class="w-6 h-6 rounded cursor-pointer border-0 p-0 bg-transparent" onchange="setTheme(this.value)">
+                        </div>
                     </div>
                 </div>
                 <div>
@@ -327,112 +345,128 @@ if ($currentTable) {
         </div>
     </div>
 
-    <div id="tracerModal" class="fixed inset-0 z-50 hidden items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm transition-opacity">
-        <div class="glass-panel w-full max-w-7xl h-[90vh] rounded-xl shadow-2xl flex flex-col overflow-hidden transform scale-95 transition-transform" id="tracerContent">
-            <div class="p-4 border-b border-slate-700/50 flex flex-col gap-4 bg-slate-800/80">
-                <div class="flex justify-between items-center">
-                    <div class="flex items-center gap-4">
-                        <button id="btnBackTracer" onclick="goBackTracer()" class="hidden px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white rounded-md transition-colors text-sm font-medium"><i class="fa-solid fa-arrow-left mr-1"></i> Kembali</button>
+    <div id="tracerModal" class="fixed inset-0 z-[100] hidden items-center justify-center p-2 md:p-4 bg-slate-900/90 backdrop-blur-md transition-opacity">
+        <div class="glass-panel w-full max-w-[98vw] lg:max-w-7xl h-[95vh] rounded-xl shadow-2xl flex flex-col overflow-hidden transform scale-95 transition-transform border border-slate-600" id="tracerContent">
+            <div class="p-4 border-b border-slate-700/50 flex flex-col gap-4 bg-slate-800/90">
+                <div class="flex justify-between items-start md:items-center">
+                    <div class="flex flex-col md:flex-row md:items-center gap-4">
+                        <button id="btnBackTracer" onclick="goBackTracer()" class="hidden px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white rounded-md transition-colors text-sm font-medium w-max"><i class="fa-solid fa-arrow-left mr-1"></i> Kembali</button>
                         <div>
-                            <h3 class="text-lg font-bold text-white flex items-center gap-2"><i class="fa-solid fa-network-wired text-theme"></i> Deep Data Inspector</h3>
-                            <div id="tracerBreadcrumbs" class="flex items-center gap-2 mt-1 text-xs text-slate-400 font-mono overflow-x-auto max-w-3xl whitespace-nowrap"></div>
+                            <h3 class="text-lg font-bold text-white flex items-center gap-2"><i class="fa-solid fa-network-wired text-theme"></i> Deep Inspector</h3>
+                            <div id="tracerBreadcrumbs" class="flex items-center gap-2 mt-1 text-xs text-slate-400 font-mono overflow-x-auto max-w-[250px] md:max-w-3xl whitespace-nowrap"></div>
                         </div>
                     </div>
-                    <button onclick="closeTracer()" class="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:bg-slate-700 hover:text-white"><i class="fa-solid fa-xmark fa-lg"></i></button>
+                    <button onclick="closeTracer()" class="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:bg-red-500/20 hover:text-red-400 transition-colors"><i class="fa-solid fa-xmark fa-lg"></i></button>
                 </div>
-                <div class="flex justify-between items-center bg-slate-900/50 p-2 rounded-lg border border-slate-700/50">
-                    <div class="flex gap-2 text-sm" id="inspectorFilters">
-                        <button class="px-3 py-1.5 rounded-md bg-theme text-white font-medium filter-btn" data-filter="all"><i class="fa-solid fa-layer-group mr-1"></i> Semua</button>
-                        <button class="px-3 py-1.5 rounded-md text-slate-400 hover:bg-slate-700 filter-btn flex gap-2 items-center" data-filter="source_row"><i class="fa-solid fa-crosshairs"></i> Data Utama <span id="badge-source" class="bg-slate-800 text-xs px-1.5 rounded">0</span></button>
-                        <button class="px-3 py-1.5 rounded-md text-slate-400 hover:bg-slate-700 filter-btn flex gap-2 items-center" data-filter="row_relations"><i class="fa-solid fa-link"></i> Relasi <span id="badge-row" class="bg-slate-800 text-xs px-1.5 rounded">0</span></button>
-                        <button class="px-3 py-1.5 rounded-md text-slate-400 hover:bg-slate-700 filter-btn flex gap-2 items-center" data-filter="global_matches"><i class="fa-solid fa-globe"></i> Global <span id="badge-global" class="bg-slate-800 text-xs px-1.5 rounded">0</span></button>
+                <div class="flex flex-col md:flex-row justify-between md:items-center bg-slate-900/60 p-2 rounded-lg border border-slate-700/50 gap-3">
+                    <div class="flex gap-2 text-sm overflow-x-auto pb-1 md:pb-0" id="inspectorFilters">
+                        <button class="px-3 py-1.5 rounded-md bg-theme text-white font-medium filter-btn whitespace-nowrap shadow-sm" data-filter="all">Semua</button>
+                        <button class="px-3 py-1.5 rounded-md text-slate-400 hover:bg-slate-700 filter-btn flex gap-2 items-center whitespace-nowrap" data-filter="source_row"><i class="fa-solid fa-crosshairs hidden md:inline"></i> Utama <span id="badge-source" class="bg-slate-800 text-xs px-1.5 rounded">0</span></button>
+                        <button class="px-3 py-1.5 rounded-md text-slate-400 hover:bg-slate-700 filter-btn flex gap-2 items-center whitespace-nowrap" data-filter="row_relations"><i class="fa-solid fa-link hidden md:inline"></i> Relasi <span id="badge-row" class="bg-slate-800 text-xs px-1.5 rounded">0</span></button>
+                        <button class="px-3 py-1.5 rounded-md text-slate-400 hover:bg-slate-700 filter-btn flex gap-2 items-center whitespace-nowrap" data-filter="global_matches"><i class="fa-solid fa-globe hidden md:inline"></i> Global <span id="badge-global" class="bg-slate-800 text-xs px-1.5 rounded">0</span></button>
                     </div>
-                    <div class="flex bg-slate-800 rounded-md p-1 border border-slate-700">
+                    <div class="flex bg-slate-800 rounded-md p-1 border border-slate-700 shrink-0">
                         <button onclick="changeTracerMode('raw')" id="tracerModeRaw" class="px-3 py-1 rounded text-xs font-bold bg-theme text-white"><i class="fa-solid fa-table mr-1"></i> Raw</button>
                         <button onclick="changeTracerMode('join')" id="tracerModeJoin" class="px-3 py-1 rounded text-xs font-bold text-slate-400 hover:text-white"><i class="fa-solid fa-object-group mr-1"></i> Join</button>
                     </div>
                 </div>
             </div>
-            <div class="p-6 overflow-y-auto flex-1 font-mono text-sm space-y-6 bg-[#0f172a]" id="tracerBody"></div>
+            <div class="p-4 md:p-6 overflow-y-auto overflow-x-hidden flex-1 font-mono text-sm space-y-6 bg-[#0f172a]" id="tracerBody"></div>
         </div>
     </div>
 
-    <aside class="w-64 bg-[#1e293b] border-r border-slate-700 flex flex-col z-40 shrink-0 shadow-xl">
-        <div class="p-6 border-b border-slate-700 flex justify-between items-center bg-[#1e293b]">
-            <h1 class="text-xl font-black text-white tracking-wide flex items-center gap-2">
+    <aside id="appSidebar" class="w-64 bg-[#1e293b] border-r border-slate-700 flex flex-col z-40 shrink-0 shadow-xl transition-all duration-300 absolute md:relative inset-y-0 left-0 -translate-x-full md:translate-x-0">
+        <div class="p-5 border-b border-slate-700 flex justify-between items-center bg-[#1e293b] h-[72px]">
+            <h1 class="text-xl font-black text-white tracking-wide flex items-center gap-2 overflow-hidden hide-on-collapse whitespace-nowrap">
                 <i class="fa-solid fa-database text-theme"></i> VOID<span class="text-slate-500 font-light">DB</span>
             </h1>
-            <button onclick="toggleSettings()" class="text-slate-400 hover:text-theme transition-colors"><i class="fa-solid fa-gear fa-lg"></i></button>
+            <div class="hidden justify-center w-full icon-on-collapse text-theme show-on-collapse"><i class="fa-solid fa-database fa-lg"></i></div>
+            <button onclick="toggleSidebarDesktop()" class="text-slate-400 hover:text-theme transition-colors hidden md:block hide-on-collapse" title="Collapse Sidebar"><i class="fa-solid fa-angles-left"></i></button>
+            <button onclick="toggleSidebarDesktop()" class="text-slate-400 hover:text-theme transition-colors hidden show-on-collapse absolute right-0 left-0 mx-auto w-max mt-16 z-50 bg-slate-800 rounded-full p-2 border border-slate-600 shadow-lg"><i class="fa-solid fa-angles-right"></i></button>
+            <button onclick="toggleSidebarMobile()" class="md:hidden text-slate-400 hover:text-red-400 text-2xl"><i class="fa-solid fa-xmark"></i></button>
         </div>
-        
-        <div class="px-6 py-4 border-b border-slate-700 bg-slate-800/30">
-            <p class="text-[10px] text-slate-500 uppercase font-bold mb-1">Active Connection</p>
-            <div class="flex items-center justify-between">
-                <div class="flex items-center gap-2 text-sm text-slate-300 font-mono truncate">
-                    <i class="fa-solid <?= $driver === 'mysql' ? 'fa-server text-blue-400' : 'fa-file-code text-emerald-400' ?>"></i>
-                    <span class="truncate" title="<?= htmlspecialchars($dbname) ?>"><?= htmlspecialchars($dbname) ?></span>
+        <div class="border-b border-slate-700 bg-slate-800/30">
+            <div class="px-5 py-4 hide-on-collapse">
+                <div class="flex items-center justify-between mb-3">
+                    <p class="text-[10px] text-slate-500 uppercase font-bold tracking-widest">Active Connection</p>
+                    <button onclick="toggleSettings()" class="text-slate-400 hover:text-theme transition-colors" title="Settings"><i class="fa-solid fa-gear"></i></button>
                 </div>
-                <a href="?action=disconnect" class="text-red-400 hover:text-red-300 ml-2" title="Disconnect / Ganti Database">
-                    <i class="fa-solid fa-power-off"></i>
-                </a>
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-2 text-sm text-slate-300 font-mono truncate bg-slate-900/50 p-1.5 rounded border border-slate-700 w-full">
+                        <i class="fa-solid <?= $driver === 'mysql' ? 'fa-server text-blue-400' : 'fa-file-code text-emerald-400' ?> ml-1"></i>
+                        <span class="truncate ml-1" title="<?= htmlspecialchars($dbname) ?>"><?= htmlspecialchars($dbname) ?></span>
+                        <a href="?action=disconnect" class="text-red-400 hover:text-red-300 ml-auto mr-1 p-1 bg-red-500/10 rounded transition-colors" title="Disconnect"><i class="fa-solid fa-power-off"></i></a>
+                    </div>
+                </div>
+            </div>
+            <div class="hidden flex-col items-center gap-4 py-6 show-on-collapse">
+                <button onclick="toggleSettings()" class="text-slate-400 hover:text-theme transition-colors p-2 rounded-lg hover:bg-slate-800" title="Settings"><i class="fa-solid fa-gear fa-xl"></i></button>
+                <a href="?action=disconnect" class="text-red-400 hover:text-red-300 transition-colors p-2 rounded-lg hover:bg-red-900/30 mt-2" title="Disconnect"><i class="fa-solid fa-power-off fa-xl"></i></a>
             </div>
         </div>
-
-        <div class="flex-1 overflow-y-auto py-4 space-y-1">
-            <div class="px-6 mb-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Daftar Tabel</div>
+        <div class="flex-1 overflow-y-auto py-4 space-y-1 hide-on-collapse">
+            <div class="px-5 mb-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest flex items-center justify-between">
+                <span>Daftar Tabel</span><span class="bg-slate-800 px-1.5 py-0.5 rounded text-slate-400"><?= count($tables) ?></span>
+            </div>
             <?php foreach ($tables as $t): ?>
-                <a href="?table=<?= urlencode($t) ?>&mode=<?= $mode ?>" class="sidebar-link block px-6 py-2.5 text-sm transition-all duration-200 <?= $t === $currentTable ? 'active' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200' ?>">
-                    <i class="fa-solid fa-table-cells text-slate-500 mr-2 opacity-70"></i> <?= htmlspecialchars($t) ?>
+                <a href="?table=<?= urlencode($t) ?>&mode=<?= $mode ?>" class="sidebar-link block px-5 py-2.5 text-sm transition-all duration-200 <?= $t === $currentTable ? 'active' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200' ?>">
+                    <i class="fa-solid fa-table-cells text-slate-500 mr-2 opacity-70 w-4 text-center"></i> 
+                    <span class="truncate"><?= htmlspecialchars($t) ?></span>
                 </a>
             <?php endforeach; ?>
         </div>
     </aside>
 
-    <main class="flex-1 flex flex-col min-w-0 bg-[#0f172a] relative">
-        <header class="bg-[#1e293b] border-b border-slate-700 shadow-sm z-40 relative">
-            <div class="p-5 flex flex-col lg:flex-row justify-between lg:items-center gap-4">
-                <div class="flex items-center gap-3">
-                    <div class="w-10 h-10 rounded-lg bg-theme/10 border border-theme/20 flex items-center justify-center text-theme"><i class="fa-solid fa-table-list fa-lg"></i></div>
-                    <div>
-                        <h2 class="text-xl font-bold text-white font-mono leading-none"><?= htmlspecialchars($currentTable) ?></h2>
-                        <p class="text-xs text-slate-400 mt-1" id="rowCount"><i class="fa-solid fa-chart-simple mr-1"></i> <?= count($rows) ?> records loaded</p>
+    <div id="sidebarOverlay" class="fixed inset-0 bg-black/50 z-30 hidden md:hidden backdrop-blur-sm" onclick="toggleSidebarMobile()"></div>
+
+    <main class="flex-1 flex flex-col min-w-0 bg-[#0f172a] relative h-screen">
+        <header class="bg-[#1e293b] border-b border-slate-700 shadow-sm z-[70] relative shrink-0 h-[72px] md:h-auto flex items-center md:items-stretch">
+            <div class="px-4 py-2 md:p-5 flex flex-1 flex-row justify-between items-center gap-4">
+                <div class="flex items-center gap-3 w-full md:w-auto">
+                    <button onclick="toggleSidebarMobile()" class="md:hidden text-slate-400 hover:text-white p-2 -ml-2 rounded-lg hover:bg-slate-800 transition-colors"><i class="fa-solid fa-bars fa-lg"></i></button>
+                    <div class="w-10 h-10 rounded-lg bg-theme/10 border border-theme/20 items-center justify-center text-theme shrink-0 hidden md:flex"><i class="fa-solid fa-table-list fa-lg"></i></div>
+                    <div class="min-w-0 flex-1">
+                        <h2 class="text-lg md:text-xl font-bold text-white font-mono leading-none truncate w-full"><?= htmlspecialchars($currentTable) ?></h2>
+                        <p class="text-[10px] md:text-xs text-slate-400 mt-1" id="rowCount"><i class="fa-solid fa-chart-simple mr-1"></i> <?= count($rows) ?> baris dimuat</p>
                     </div>
                 </div>
-                
-                <div class="flex flex-wrap items-center gap-3">
-                    <div class="relative group">
-                        <i class="fa-solid fa-magnifying-glass absolute left-3 top-2.5 text-slate-500 group-focus-within:text-theme transition-colors text-sm"></i>
-                        <input type="text" id="globalSearch" placeholder="Cari di tabel ini..." class="pl-9 pr-4 py-2 bg-slate-900 border border-slate-700 focus:border-theme rounded-lg text-sm outline-none text-slate-200 transition-all w-56 focus:w-72 shadow-inner">
+                <div class="flex items-center gap-2 md:gap-3 shrink-0 ml-auto">
+                    <div class="relative group hidden md:block shrink-0">
+                        <i class="fa-solid fa-magnifying-glass absolute left-3 top-2.5 text-slate-500 group-focus-within:text-theme transition-colors text-xs md:text-sm"></i>
+                        <input type="text" id="globalSearch" placeholder="Cari data..." class="pl-8 pr-3 py-1.5 md:py-2 bg-slate-900 border border-slate-700 focus:border-theme rounded-lg text-xs md:text-sm outline-none text-slate-200 transition-all w-32 md:w-56 focus:w-48 md:focus:w-72 shadow-inner">
                     </div>
-
-                    <div class="relative group">
-                        <button class="px-4 py-2 bg-slate-800 border border-slate-600 hover:border-slate-500 rounded-lg text-sm transition-colors flex items-center gap-2 text-slate-200 shadow-sm">
-                            <i class="fa-solid fa-eye-slash text-slate-400"></i> Kolom
+                    <div class="relative group shrink-0">
+                        <button class="px-3 md:px-4 py-1.5 md:py-2 bg-slate-800 border border-slate-600 hover:border-slate-500 rounded-lg text-xs md:text-sm transition-colors flex items-center gap-2 text-slate-200 shadow-sm">
+                            <i class="fa-solid fa-eye-slash text-slate-400"></i> <span class="hidden md:inline">Kolom</span>
                         </button>
-                        <div class="absolute right-0 mt-2 w-64 bg-slate-800 border border-slate-700 rounded-lg shadow-2xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all p-2 flex flex-col gap-1 max-h-72 overflow-y-auto" id="columnToggles"></div>
+                        <div class="absolute right-0 mt-2 w-56 md:w-64 bg-slate-800 border border-slate-700 rounded-lg shadow-2xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all p-2 flex flex-col gap-1 max-h-60 overflow-y-auto z-[100]" id="columnToggles"></div>
                     </div>
-
-                    <a href="?action=sqlite&table=<?= urlencode($currentTable) ?>" class="px-4 py-2 bg-slate-800 border border-slate-600 hover-border-theme hover-text-theme text-slate-200 rounded-lg text-sm font-medium transition-all flex items-center gap-2 shadow-sm">
-                        <i class="fa-solid fa-download text-slate-400 group-hover:text-theme"></i> .sqlite
+                    <a href="?action=sqlite&table=<?= urlencode($currentTable) ?>" class="px-3 md:px-4 py-1.5 md:py-2 bg-slate-800 border border-slate-600 hover-border-theme hover-bg-theme text-slate-200 rounded-lg text-xs md:text-sm font-medium transition-all items-center gap-2 shadow-sm shrink-0 hidden md:flex">
+                        <i class="fa-solid fa-download"></i> <span class="hidden lg:inline">.sqlite</span>
                     </a>
-                    
-                    <div class="flex bg-slate-900 rounded-lg p-1 border border-slate-700 shadow-inner">
-                        <a href="?table=<?= urlencode($currentTable) ?>&mode=raw" class="px-4 py-1.5 rounded-md text-sm transition-colors <?= $mode === 'raw' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500 hover:text-white' ?>"><i class="fa-solid fa-cube mr-1"></i> Raw</a>
-                        <a href="?table=<?= urlencode($currentTable) ?>&mode=join" class="px-4 py-1.5 rounded-md text-sm transition-colors <?= $mode === 'join' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500 hover:text-white' ?>"><i class="fa-solid fa-link mr-1"></i> Joined</a>
+                    <div class="flex bg-slate-900 rounded-lg p-1 border border-slate-700 shadow-inner shrink-0">
+                        <a href="?table=<?= urlencode($currentTable) ?>&mode=raw" class="px-3 md:px-4 py-1 md:py-1.5 rounded-md text-xs md:text-sm transition-colors <?= $mode === 'raw' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500 hover:text-white' ?>"><i class="fa-solid fa-cube md:mr-1"></i> <span class="hidden md:inline">Raw</span></a>
+                        <a href="?table=<?= urlencode($currentTable) ?>&mode=join" class="px-3 md:px-4 py-1 md:py-1.5 rounded-md text-xs md:text-sm transition-colors <?= $mode === 'join' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500 hover:text-white' ?>"><i class="fa-solid fa-link md:mr-1"></i> <span class="hidden md:inline">Joined</span></a>
                     </div>
+                </div>
+            </div>
+            <div class="px-4 pb-3 md:hidden">
+                <div class="relative w-full">
+                    <i class="fa-solid fa-magnifying-glass absolute left-3 top-2.5 text-slate-500 text-xs"></i>
+                    <input type="text" id="globalSearchMobile" placeholder="Cari data..." class="w-full pl-8 pr-3 py-2 bg-slate-900 border border-slate-700 focus:border-theme rounded-lg text-sm outline-none text-slate-200 shadow-inner">
                 </div>
             </div>
         </header>
 
-        <div class="p-6 flex-1 overflow-hidden">
-            <div class="table-wrapper overflow-auto rounded-xl border border-slate-700 bg-[#1e293b] shadow-lg relative">
+        <div class="p-4 md:p-6 flex-1 overflow-hidden">
+            <div class="table-wrapper overflow-auto rounded-xl border border-slate-700 bg-[#1e293b] shadow-lg relative h-full">
                 <table class="w-full text-left border-collapse whitespace-nowrap" id="dataTable">
                     <?php if (!empty($rows)): ?>
                         <thead class="bg-slate-800 text-slate-300 text-xs uppercase tracking-wider select-none shadow-sm">
                             <tr id="tableHeaderRow">
                                 <?php foreach (array_keys($rows[0]) as $index => $col): ?>
                                     <th class="border-b border-slate-700 font-semibold bg-slate-800 group">
-                                        <div class="flex items-center justify-between px-5 py-3.5">
+                                        <div class="flex items-center justify-between px-4 md:px-5 py-3">
                                             <div class="flex items-center gap-1 cursor-pointer hover-text-theme flex-1 transition-colors" onclick="sortTable(<?= $index ?>, this)">
                                                 <span class="flex-1"><?= htmlspecialchars($col) ?></span><i class="fa-solid fa-sort sort-icon"></i>
                                             </div>
@@ -442,7 +476,7 @@ if ($currentTable) {
                                 <?php endforeach; ?>
                             </tr>
                         </thead>
-                        <tbody class="text-sm divide-y divide-slate-700/50 font-mono text-slate-300">
+                        <tbody class="text-xs md:text-sm divide-y divide-slate-700/50 font-mono text-slate-300">
                             <?php foreach ($rows as $row): ?>
                                 <tr class="hover:bg-slate-800/80 transition-colors data-row">
                                     <?php 
@@ -451,24 +485,15 @@ if ($currentTable) {
                                     foreach ($row as $cell): 
                                         $colName = $colKeys[$colIndex];
                                     ?>
-                                        <td class="py-3 px-5" onclick="startTrace('<?= htmlspecialchars($currentTable) ?>', '<?= htmlspecialchars($colName) ?>', '<?= htmlspecialchars($cell ?? '') ?>')">
+                                        <td class="py-2.5 px-4 md:px-5" onclick="startTrace('<?= htmlspecialchars($currentTable) ?>', '<?= htmlspecialchars($colName) ?>', '<?= htmlspecialchars($cell ?? '') ?>')">
                                             <?= ($cell === null) ? '<span class="text-slate-600 italic">NULL</span>' : htmlspecialchars($cell) ?>
                                         </td>
-                                    <?php 
-                                    $colIndex++;
-                                    endforeach; ?>
+                                    <?php $colIndex++; endforeach; ?>
                                 </tr>
                             <?php endforeach; ?>
                         </tbody>
                     <?php else: ?>
-                        <tbody>
-                            <tr>
-                                <td class="py-20 text-center text-slate-500">
-                                    <i class="fa-solid fa-folder-open text-4xl mb-3 opacity-50"></i>
-                                    <p>Tidak ada data di tabel ini.</p>
-                                </td>
-                            </tr>
-                        </tbody>
+                        <tbody><tr><td class="py-20 text-center text-slate-500"><i class="fa-solid fa-folder-open text-4xl mb-3 opacity-50"></i><p>Tidak ada data di tabel ini.</p></td></tr></tbody>
                     <?php endif; ?>
                 </table>
             </div>
@@ -476,27 +501,65 @@ if ($currentTable) {
     </main>
 
     <script>
-        // --- THEME ENGINE ---
+        const sidebar = document.getElementById('appSidebar');
+        const overlay = document.getElementById('sidebarOverlay');
+        let isDesktopCollapsed = false;
+
+        function toggleSidebarMobile() {
+            sidebar.classList.toggle('-translate-x-full');
+            overlay.classList.toggle('hidden');
+        }
+
+        function toggleSidebarDesktop() {
+            isDesktopCollapsed = !isDesktopCollapsed;
+            if(isDesktopCollapsed) {
+                sidebar.classList.add('sidebar-collapsed');
+                document.querySelectorAll('.show-on-collapse').forEach(el => el.classList.remove('hidden', 'md:hidden'));
+                document.querySelectorAll('.show-on-collapse').forEach(el => el.classList.add('flex'));
+            } else {
+                sidebar.classList.remove('sidebar-collapsed');
+                document.querySelectorAll('.show-on-collapse').forEach(el => el.classList.add('hidden'));
+                document.querySelectorAll('.show-on-collapse').forEach(el => el.classList.remove('flex'));
+            }
+        }
+
         function toggleSettings() {
             const m = document.getElementById('settingsModal');
             m.classList.toggle('hidden'); m.classList.toggle('flex');
         }
-        function setTheme(name, hexColor, hexHover) {
+
+        function setTheme(hexColor) {
+            const darkenHex = (hex, amount) => {
+                let color = hex.replace('#', '');
+                if (color.length === 3) color = color.split('').map(c => c + c).join('');
+                let num = parseInt(color, 16);
+                let r = Math.max(0, (num >> 16) - amount);
+                let g = Math.max(0, ((num >> 8) & 0x00FF) - amount);
+                let b = Math.max(0, (num & 0x0000FF) - amount);
+                return '#' + (g | (b << 8) | (r << 16)).toString(16).padStart(6, '0');
+            };
+
+            const hexHover = darkenHex(hexColor, 20);
             const root = document.documentElement;
             root.style.setProperty('--theme-color', hexColor);
             root.style.setProperty('--theme-color-hover', hexHover);
+            
             let c; if(/^#([A-Fa-f0-9]{3}){1,2}$/.test(hexColor)){
                 c= hexColor.substring(1).split('');
                 if(c.length== 3) c= [c[0], c[0], c[1], c[1], c[2], c[2]];
                 c= '0x'+c.join('');
-                root.style.setProperty('--theme-bg-subtle', 'rgba('+[(c>>16)&255, (c>>8)&255, c&255].join(',')+',0.1)');
+                root.style.setProperty('--theme-bg-subtle', 'rgba('+[(c>>16)&255, (c>>8)&255, c&255].join(',')+',0.15)');
             }
-            localStorage.setItem('voidDbTheme', JSON.stringify({color: hexColor, hover: hexHover}));
+            
+            document.getElementById('colorPicker').value = hexColor;
+            
+            // Simpan Theme secara Global di Backend Session (AJAX)
+            const formData = new FormData();
+            formData.append('color', hexColor);
+            formData.append('hover', hexHover);
+            fetch('?action=save_theme', {method: 'POST', body: formData});
         }
-        const savedTheme = JSON.parse(localStorage.getItem('voidDbTheme'));
-        if (savedTheme) setTheme('custom', savedTheme.color, savedTheme.hover);
 
-        // --- COLUMNS HIDER ENGINE ---
         const colContainer = document.getElementById('columnToggles');
         if (colContainer) {
             document.querySelectorAll('#tableHeaderRow th').forEach((th, index) => {
@@ -513,7 +576,6 @@ if ($currentTable) {
             if (!isVisible && currentPinnedIndex === index) pinColumn(index);
         }
 
-        // --- DYNAMIC PIN COLUMN FIX ---
         let currentPinnedIndex = -1;
         function pinColumn(index) {
             const nth = index + 1;
@@ -552,21 +614,55 @@ if ($currentTable) {
             rows.forEach(row => tbody.appendChild(row));
         }
 
-        document.getElementById('globalSearch').addEventListener('keyup', function() {
-            let filter = this.value.toLowerCase(), count = 0;
+        // --- SORTING KHUSUS TABEL DI DALAM INSPECTOR ---
+        function sortInspectorTable(headerElem, n) {
+            const table = headerElem.closest('table');
+            const tbody = table.querySelector('tbody');
+            const rows = Array.from(tbody.querySelectorAll('tr'));
+            
+            // Reset state kolom lain
+            table.querySelectorAll('th').forEach(th => {
+                if (th !== headerElem) {
+                    th.classList.remove('asc', 'desc');
+                    const icon = th.querySelector('i.fa-sort-up, i.fa-sort-down');
+                    if(icon) icon.className = 'fa-solid fa-sort opacity-30 group-hover/th:opacity-100 transition-opacity sort-icon-insp';
+                }
+            });
+
+            let isAsc = headerElem.dataset.dir !== 'asc';
+            headerElem.dataset.dir = isAsc ? 'asc' : 'desc';
+            headerElem.classList.add(isAsc ? 'asc' : 'desc');
+            
+            const icon = headerElem.querySelector('i');
+            icon.className = isAsc ? 'fa-solid fa-sort-up text-theme opacity-100' : 'fa-solid fa-sort-down text-theme opacity-100';
+
+            rows.sort((a, b) => {
+                let x = a.children[n].innerText.trim(), y = b.children[n].innerText.trim();
+                if(x === 'NULL') return isAsc ? -1 : 1;
+                if(y === 'NULL') return isAsc ? 1 : -1;
+                let numX = parseFloat(x), numY = parseFloat(y);
+                if(!isNaN(numX) && !isNaN(numY)) return isAsc ? numX - numY : numY - numX;
+                return isAsc ? x.localeCompare(y) : y.localeCompare(x);
+            });
+            rows.forEach(row => tbody.appendChild(row));
+        }
+
+        const executeSearch = function(val) {
+            let filter = val.toLowerCase(), count = 0;
             document.querySelectorAll("#dataTable tbody tr.data-row").forEach(row => {
                 if(row.innerText.toLowerCase().includes(filter)) { row.style.display = ""; count++; }
                 else row.style.display = "none";
             });
-            document.getElementById('rowCount').innerHTML = `<i class="fa-solid fa-chart-simple mr-1"></i> ${count} records loaded`;
-        });
+            document.getElementById('rowCount').innerHTML = `<i class="fa-solid fa-chart-simple mr-1"></i> ${count} baris dimuat`;
+        };
+        const searchDesk = document.getElementById('globalSearch');
+        const searchMob = document.getElementById('globalSearchMobile');
+        if(searchDesk) searchDesk.addEventListener('keyup', (e) => executeSearch(e.target.value));
+        if(searchMob) searchMob.addEventListener('keyup', (e) => executeSearch(e.target.value));
 
-        // --- ULTRA DEEP RECURSIVE TRACER ---
         const modal = document.getElementById('tracerModal');
         const tracerBody = document.getElementById('tracerBody');
-        let traceHistory = [];
-        let currentTraceData = null; 
-        let currentTracerMode = 'raw'; 
+        let traceHistory = []; let currentTraceData = null; let currentTracerMode = 'raw'; 
 
         function changeTracerMode(mode) {
             currentTracerMode = mode;
@@ -606,10 +702,10 @@ if ($currentTable) {
             document.getElementById('btnBackTracer').style.display = traceHistory.length > 1 ? 'block' : 'none';
             
             document.getElementById('tracerBreadcrumbs').innerHTML = traceHistory.map((step, i) => {
-                return `<span class="${i === traceHistory.length - 1 ? 'text-theme font-bold' : 'text-slate-500'}">${step.table} (${step.col}=${step.val})</span>`;
+                return `<span class="${i === traceHistory.length - 1 ? 'text-theme font-bold' : 'text-slate-500'}">${step.table} <span class="hidden md:inline">(${step.col}=${step.val})</span></span>`;
             }).join(' <span class="text-slate-600 text-[10px]"><i class="fa-solid fa-chevron-right"></i></span> ');
 
-            tracerBody.innerHTML = `<div class="flex flex-col gap-4 justify-center items-center p-20"><i class="fa-solid fa-circle-notch fa-spin text-4xl text-theme"></i><p class="text-slate-400">Menarik data dari database...</p></div>`;
+            tracerBody.innerHTML = `<div class="flex flex-col gap-4 justify-center items-center p-12 md:p-20"><i class="fa-solid fa-circle-notch fa-spin text-4xl text-theme"></i><p class="text-slate-400 text-xs md:text-sm">Menarik relasi data dari database...</p></div>`;
 
             try {
                 const response = await fetch(`?action=trace&table=${encodeURIComponent(tableName)}&col=${encodeURIComponent(colName)}&val=${encodeURIComponent(value)}&trace_mode=${currentTracerMode}`);
@@ -651,20 +747,32 @@ if ($currentTable) {
 
             const renderBlock = (groups, sectionTitle, iconHtml, colorCls) => {
                 if(groups.length === 0) return '';
-                let blockHtml = `<h4 class="text-white font-bold mb-4 mt-6 flex items-center gap-2 px-2 text-base border-b border-slate-700 pb-2"><span class="text-${colorCls}">${iconHtml}</span> ${sectionTitle}</h4><div class="space-y-5 mb-8">`;
+                let blockHtml = `<h4 class="text-white font-bold mb-4 mt-6 flex items-center gap-2 px-2 text-sm md:text-base border-b border-slate-700 pb-2"><span class="text-${colorCls}">${iconHtml}</span> ${sectionTitle}</h4><div class="space-y-5 mb-8">`;
                 groups.forEach(group => {
                     if(group.data.length === 0) return;
                     let keys = Object.keys(group.data[0]);
                     blockHtml += `
                         <div class="bg-[#1e293b] border border-slate-700 rounded-xl overflow-hidden shadow-md">
-                            <div class="bg-slate-800 px-4 py-3 flex justify-between items-center border-b border-slate-700">
-                                <span class="text-[10px] text-${colorCls} font-bold uppercase tracking-widest bg-slate-900 px-2.5 py-1 rounded border border-slate-700">${group.type}</span>
-                                <span class="text-sm text-white font-bold tracking-wide flex items-center gap-2"><i class="fa-solid fa-table text-slate-500"></i> ${group.table} <span class="bg-slate-700 text-slate-300 text-[10px] px-2 py-0.5 rounded-full ml-1">${group.data.length} baris</span></span>
+                            <div class="bg-slate-800 px-4 py-3 flex flex-wrap justify-between items-center border-b border-slate-700 gap-2">
+                                <div class="flex items-center">
+                                    <span class="text-[10px] text-${colorCls} font-bold uppercase tracking-widest bg-slate-900 px-2.5 py-1 rounded border border-slate-700 shrink-0">${group.type}</span>
+                                    <span class="text-sm text-white font-bold tracking-wide flex items-center gap-2 truncate ml-3"><i class="fa-solid fa-table text-slate-500 hidden md:inline"></i> <span class="truncate">${group.table}</span> <span class="bg-slate-700 text-slate-300 text-[10px] px-2 py-0.5 rounded-full ml-1 shrink-0">${group.data.length} baris</span></span>
+                                </div>
+                                <a href="?table=${encodeURIComponent(group.table)}" class="text-xs bg-theme/20 text-theme hover-bg-theme px-3 py-1.5 rounded transition-colors flex items-center gap-2 shrink-0 font-bold border border-theme/30">
+                                    <i class="fa-solid fa-arrow-up-right-from-square"></i> <span class="hidden md:inline">Buka Tabel</span>
+                                </a>
                             </div>
-                            <div class="overflow-x-auto">
-                                <table class="w-full text-left text-sm">
+                            <div class="overflow-x-auto w-full">
+                                <table class="w-full text-left text-sm min-w-max">
                                     <thead class="bg-[#0f172a]/50 text-slate-400 text-xs">
-                                        <tr>${keys.map(k => `<th class="px-4 py-3 font-semibold border-b border-slate-700 whitespace-nowrap">${k}</th>`).join('')}</tr>
+                                        <tr>${keys.map((k, idx) => `
+                                            <th class="px-4 py-3 font-semibold border-b border-slate-700 whitespace-nowrap cursor-pointer hover-text-theme transition-colors group/th" onclick="sortInspectorTable(this, ${idx})">
+                                                <div class="flex items-center justify-between gap-2">
+                                                    <span>${k}</span>
+                                                    <i class="fa-solid fa-sort opacity-30 group-hover/th:opacity-100 transition-opacity sort-icon-insp"></i>
+                                                </div>
+                                            </th>`).join('')}
+                                        </tr>
                                     </thead>
                                     <tbody class="divide-y divide-slate-700/50 font-mono text-xs">
                                         ${group.data.map(row => `
@@ -696,7 +804,7 @@ if ($currentTable) {
             }
 
             if(html === '') {
-                html = `<div class="text-center p-12 bg-slate-800/50 rounded-xl border border-slate-700"><i class="fa-solid fa-box-open text-4xl text-slate-600 mb-4"></i><p class="text-slate-400">Tidak ada data untuk kategori ini.</p></div>`;
+                html = `<div class="text-center p-8 md:p-12 bg-slate-800/50 rounded-xl border border-slate-700"><i class="fa-solid fa-box-open text-4xl text-slate-600 mb-4"></i><p class="text-slate-400">Tidak ada data untuk kategori ini.</p></div>`;
             }
             tracerBody.innerHTML = html;
         }
