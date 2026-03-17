@@ -986,6 +986,20 @@ if ($currentTable) {
                     title="Disconnect"><i class="fa-solid fa-power-off fa-xl"></i></button>
             </div>
         </div>
+        <div class="px-5 mt-auto pt-6 border-t border-slate-700 space-y-3 mb-4">
+            <p class="text-[10px] text-slate-500 uppercase font-bold tracking-widest mb-2 flex items-center gap-1.5">
+                <i class="fa-solid fa-download"></i> Ekspor & Backup
+            </p>
+            <a href="?action=sqlite_all"
+                class="flex items-center gap-2 text-[11px] font-bold text-slate-400 hover:text-emerald-400 transition-colors py-1.5 px-2 rounded hover:bg-emerald-500/10 border border-transparent hover:border-emerald-500/30"><i
+                    class="fa-solid fa-database w-4 text-center"></i> Full DB (.sqlite)</a>
+            <a href="?action=export_json_all"
+                class="flex items-center gap-2 text-[11px] font-bold text-slate-400 hover:text-amber-400 transition-colors py-1.5 px-2 rounded hover:bg-amber-500/10 border border-transparent hover:border-amber-500/30"><i
+                    class="fa-solid fa-file-code w-4 text-center"></i> Full DB (.json)</a>
+            <a href="?action=export_csv&table=<?= urlencode($currentTable) ?>"
+                class="flex items-center gap-2 text-[11px] font-bold text-slate-400 hover:text-blue-400 transition-colors py-1.5 px-2 rounded hover:bg-blue-500/10 border border-transparent hover:border-blue-500/30"><i
+                    class="fa-solid fa-file-csv w-4 text-center"></i> Current Table (.csv)</a>
+        </div>
         <div class="flex-1 overflow-y-auto py-4 space-y-1 hide-on-collapse flex flex-col">
             <div
                 class="px-5 mb-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest flex items-center justify-between">
@@ -999,21 +1013,6 @@ if ($currentTable) {
                     <span class="truncate"><?= htmlspecialchars($t) ?></span>
                 </a>
             <?php endforeach; ?>
-
-            <div class="px-5 mt-auto pt-6 border-t border-slate-700 space-y-3 mb-4">
-                <p
-                    class="text-[10px] text-slate-500 uppercase font-bold tracking-widest mb-2 flex items-center gap-1.5">
-                    <i class="fa-solid fa-download"></i> Ekspor & Backup</p>
-                <a href="?action=sqlite_all"
-                    class="flex items-center gap-2 text-[11px] font-bold text-slate-400 hover:text-emerald-400 transition-colors py-1.5 px-2 rounded hover:bg-emerald-500/10 border border-transparent hover:border-emerald-500/30"><i
-                        class="fa-solid fa-database w-4 text-center"></i> Full DB (.sqlite)</a>
-                <a href="?action=export_json_all"
-                    class="flex items-center gap-2 text-[11px] font-bold text-slate-400 hover:text-amber-400 transition-colors py-1.5 px-2 rounded hover:bg-amber-500/10 border border-transparent hover:border-amber-500/30"><i
-                        class="fa-solid fa-file-code w-4 text-center"></i> Full DB (.json)</a>
-                <a href="?action=export_csv&table=<?= urlencode($currentTable) ?>"
-                    class="flex items-center gap-2 text-[11px] font-bold text-slate-400 hover:text-blue-400 transition-colors py-1.5 px-2 rounded hover:bg-blue-500/10 border border-transparent hover:border-blue-500/30"><i
-                        class="fa-solid fa-file-csv w-4 text-center"></i> Current Table (.csv)</a>
-            </div>
         </div>
     </aside>
 
@@ -1031,10 +1030,12 @@ if ($currentTable) {
                             class="fa-solid fa-bars fa-lg"></i></button>
                     <div
                         class="w-10 h-10 rounded-lg bg-theme/10 border border-theme/20 items-center justify-center text-theme shrink-0 hidden md:flex">
-                        <i class="fa-solid fa-table-list fa-lg"></i></div>
+                        <i class="fa-solid fa-table-list fa-lg"></i>
+                    </div>
                     <div class="min-w-0 flex-1">
                         <h2 class="text-lg md:text-xl font-bold text-white font-mono leading-none truncate w-full">
-                            <?= htmlspecialchars($currentTable) ?></h2>
+                            <?= htmlspecialchars($currentTable) ?>
+                        </h2>
                         <p class="text-[10px] md:text-xs text-slate-400 mt-1" id="rowCount"><i
                                 class="fa-solid fa-chart-simple mr-1"></i> <?= count($rows) ?> baris dimuat</p>
                     </div>
