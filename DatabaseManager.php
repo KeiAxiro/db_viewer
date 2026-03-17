@@ -397,6 +397,36 @@ class DatabaseManager {
         }
         return $dbFile;
     }
+    // ==========================================
+    // --- FITUR CRUD (EDITOR MODE) ---
+    // ==========================================
     
+    public function insertRecord($table, $data) {
+        $cols = array_keys($data);
+        $colString = implode('`, `', $cols);
+        $placeholders = implode(', ', array_fill(0, count($cols), '?'));
+        $sql = "INSERT INTO `$table` (`$colString`) VALUES ($placeholders)";
+        $stmt = $this->pdo->prepare($sql);
+        return $stmt->execute(array_values($data));
+    }
+
+    public function updateRecord($table, $pkCol, $pkVal, $data) {
+        $setParts = [];
+        foreach ($data as $col => $val) {
+            $setParts[] = "`$col` = ?";
+        }
+        $setString = implode(', ', $setParts);
+        $sql = "UPDATE `$table` SET $setString WHERE `$pkCol` = ?";
+        $values = array_values($data);
+        $values[] = $pkVal;
+        $stmt = $this->pdo->prepare($sql);
+        return $stmt->execute($values);
+    }
+
+    public function deleteRecord($table, $pkCol, $pkVal) {
+        $sql = "DELETE FROM `$table` WHERE `$pkCol` = ?";
+        $stmt = $this->pdo->prepare($sql);
+        return $stmt->execute([$pkVal]);
+    }
 }
 ?>

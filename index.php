@@ -11,7 +11,6 @@ function convertArrayToSQLite($pdo, $tableName, $data) {
     }
     $tableName = preg_replace('/[^a-zA-Z0-9_]/', '_', $tableName);
     
-    // Kumpulkan semua nama kolom dari seluruh baris (Menghindari JSON berlubang)
     $allKeys = [];
     foreach ($data as $row) {
         if (is_array($row)) {
@@ -48,7 +47,18 @@ function convertArrayToSQLite($pdo, $tableName, $data) {
     $pdo->commit();
 }
 
-// --- HANDLE THEME SAVE (GLOBAL SESSION) ---
+function getNativeColumns($pdo, $table, $driver) {
+    try {
+        if ($driver === 'sqlite') {
+            $stmt = $pdo->query("PRAGMA table_info(`$table`)");
+            return array_column($stmt->fetchAll(PDO::FETCH_ASSOC), 'name');
+        } else {
+            $stmt = $pdo->query("SHOW COLUMNS FROM `$table`");
+            return array_column($stmt->fetchAll(PDO::FETCH_ASSOC), 'Field');
+        }
+    } catch (Exception $e) { return []; }
+}
+
 if (isset($_GET['action']) && $_GET['action'] === 'save_theme') {
     $_SESSION['theme_color'] = $_POST['color'];
     $_SESSION['theme_color_hover'] = $_POST['hover'];
@@ -95,7 +105,6 @@ if ($handle = opendir($tempDir)) {
     closedir($handle);
 }
 
-// --- HANDLE CONNECTION FORM SUBMISSION ---
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (isset($_POST['connect_mysql'])) {
         $_SESSION['db_connection'] = [
@@ -120,8 +129,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 header("Location: index.php"); exit;
             }
         } else {
-            $errCodes = [ UPLOAD_ERR_INI_SIZE => 'Ukuran file melebihi batas php.ini.', UPLOAD_ERR_PARTIAL => 'Terupload sebagian.', UPLOAD_ERR_NO_FILE => 'Tidak ada file yang diunggah.' ];
-            $conn_error = "Upload Gagal: " . ($errCodes[$file['error']] ?? "Error Code {$file['error']}");
+            $conn_error = "Upload Gagal: Error Code {$file['error']}";
         }
    } elseif (isset($_POST['connect_file']) && isset($_FILES['data_file'])) {
         $file = $_FILES['data_file'];
@@ -131,7 +139,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!in_array($file_ext, $allowed_exts)) {
             $conn_error = "Upload Gagal: Format file tidak didukung! Harap unggah file .json atau .csv.";
         } elseif ($file['error'] === UPLOAD_ERR_OK) {
-            // INI MAGIC-NYA: Kita ubah File JSON/CSV jadi Database SQLite Sementara!
             $destSqlite = $tempDir . '/converted_' . time() . '_' . rand(1000,9999) . '.sqlite';
             try {
                 $pdoTemp = new PDO("sqlite:" . $destSqlite);
@@ -140,20 +147,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($file_ext === 'json') {
                     $content = file_get_contents($file['tmp_name']);
                     $json = json_decode($content, true);
-                    if (json_last_error() !== JSON_ERROR_NONE) {
-                        throw new Exception("File JSON tidak valid: " . json_last_error_msg());
-                    }
-                    
-                    // Deteksi struktur phpMyAdmin (banyak tabel)
                     $isPhpMyAdmin = false;
                     if (is_array($json)) {
                         foreach ($json as $item) {
-                            if (is_array($item) && isset($item['type']) && $item['type'] === 'table') {
-                                $isPhpMyAdmin = true; break;
-                            }
+                            if (is_array($item) && isset($item['type']) && $item['type'] === 'table') { $isPhpMyAdmin = true; break; }
                         }
                     }
-
                     if ($isPhpMyAdmin) {
                         foreach ($json as $item) {
                             if (is_array($item) && isset($item['type']) && $item['type'] === 'table' && isset($item['name'])) {
@@ -161,9 +160,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             }
                         }
                     } else {
-                        if (!is_array($json) || (array_keys($json) !== range(0, count($json) - 1))) {
-                            $json = [$json]; // Ubah objek jadi array 1 item
-                        }
+                        if (!is_array($json) || (array_keys($json) !== range(0, count($json) - 1))) $json = [$json]; 
                         convertArrayToSQLite($pdoTemp, basename($file['name'], '.json'), $json);
                     }
                 } else if ($file_ext === 'csv') {
@@ -183,27 +180,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         }
                         fclose($handle);
                         convertArrayToSQLite($pdoTemp, basename($file['name'], '.csv'), $data);
-                    } else {
-                        throw new Exception("Gagal membaca file CSV.");
                     }
                 }
-                
-                // Set sesi seolah-olah user mengupload SQLite! (Sehingga UI dapat Full Feature SQL)
                 $_SESSION['db_connection'] = ['driver' => 'sqlite', 'file' => $destSqlite, 'dbname' => basename($file['name']) . ' (Parsed)'];
                 header("Location: index.php"); exit;
             } catch (Exception $e) {
                 $conn_error = "Konversi Gagal: " . $e->getMessage();
                 @unlink($destSqlite);
             }
-        } else {
-            $conn_error = "Upload Gagal dengan Error Code {$file['error']}";
         }
     }
 }
 
-// ==========================================
-// TAMPILAN LOGIN / KONEKSI
-// ==========================================
 if ($pdo === null):
 ?>
 <!DOCTYPE html>
@@ -231,13 +219,7 @@ if ($pdo === null):
         <div class="flex-1 p-6 lg:p-10 border-b lg:border-b-0 lg:border-r border-slate-700 relative">
             <h2 class="text-2xl font-bold text-theme mb-2"><i class="fa-solid fa-server mr-2"></i> MySQL Server</h2>
             <p class="text-sm text-slate-400 mb-6">Hubungkan ke database lokal atau remote.</p>
-            
-            <?php if(isset($conn_error)): ?>
-                <div class="bg-red-500/10 border border-red-500 text-red-400 p-3 rounded-lg text-xs mb-4">
-                    <i class="fa-solid fa-triangle-exclamation"></i> <?= htmlspecialchars($conn_error) ?>
-                </div>
-            <?php endif; ?>
-
+            <?php if(isset($conn_error)): ?><div class="bg-red-500/10 border border-red-500 text-red-400 p-3 rounded-lg text-xs mb-4"><i class="fa-solid fa-triangle-exclamation"></i> <?= htmlspecialchars($conn_error) ?></div><?php endif; ?>
             <form method="POST" class="space-y-4" id="mysqlForm">
                 <input type="hidden" name="connect_mysql" value="1">
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -262,21 +244,9 @@ if ($pdo === null):
             <form method="POST" enctype="multipart/form-data" class="flex flex-col flex-1" id="sqliteForm">
                 <input type="hidden" name="connect_sqlite" value="1">
                 <div class="flex-1 border-2 border-dashed border-slate-600 rounded-xl flex flex-col items-center justify-center p-8 text-center hover:border-emerald-500 hover:bg-emerald-500/5 transition-colors group cursor-pointer relative min-h-[250px]">
-                    <input type="file" name="sqlite_file" accept=".sqlite,.db,.sqlite3" required class="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" 
-                    onchange="
-                        const allowedExts = ['sqlite', 'sqlite3', 'db']; const file = this.files[0];
-                        if (file) {
-                            if (!allowedExts.includes(file.name.split('.').pop().toLowerCase())) {
-                                alert('Format ditolak! Hanya menerima .sqlite, .sqlite3, atau .db'); this.value = ''; return false;
-                            }
-                            document.getElementById('uploadIcon').className = 'fa-solid fa-circle-notch fa-spin text-5xl text-emerald-500 mb-4'; 
-                            document.getElementById('fileName').innerText = 'Memuat Database...'; 
-                            this.form.submit();
-                        }
-                    ">
+                    <input type="file" name="sqlite_file" accept=".sqlite,.db,.sqlite3" required class="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" onchange="if(this.files[0]) this.form.submit();">
                     <i id="uploadIcon" class="fa-solid fa-cloud-arrow-up text-5xl text-slate-500 group-hover:text-emerald-500 mb-4 transition-colors"></i>
-                    <p class="text-base font-bold text-slate-300 group-hover:text-emerald-400" id="fileName">Klik atau Drop file SQLite ke sini</p>
-                    <p class="text-sm text-slate-500 mt-2" id="fileDesc">Mendukung file format .sqlite, .sqlite3, .db</p>
+                    <p class="text-base font-bold text-slate-300 group-hover:text-emerald-400">Klik / Drop file SQLite</p>
                 </div>
             </form>
         </div>
@@ -286,20 +256,9 @@ if ($pdo === null):
             <form method="POST" enctype="multipart/form-data" class="flex flex-col flex-1" id="fileForm">
                 <input type="hidden" name="connect_file" value="1">
                 <div class="flex-1 border-2 border-dashed border-slate-600 rounded-xl flex flex-col items-center justify-center p-8 text-center hover:border-amber-400 hover:bg-amber-400/5 transition-colors group cursor-pointer relative min-h-[250px]">
-                    <input type="file" name="data_file" accept=".json,.csv" required class="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" 
-                    onchange="
-                        const allowedExts = ['json', 'csv']; const file = this.files[0];
-                        if (file) {
-                            if (!allowedExts.includes(file.name.split('.').pop().toLowerCase())) {
-                                alert('Format ditolak! Hanya menerima .json atau .csv'); this.value = ''; return false;
-                            }
-                            document.getElementById('uploadIconFile').className = 'fa-solid fa-circle-notch fa-spin text-5xl text-amber-400 mb-4'; 
-                            document.getElementById('fileNameFile').innerText = 'Mengonversi Data...'; 
-                            this.form.submit();
-                        }
-                    ">
+                    <input type="file" name="data_file" accept=".json,.csv" required class="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" onchange="if(this.files[0]) this.form.submit();">
                     <i id="uploadIconFile" class="fa-solid fa-file-code text-5xl text-slate-500 group-hover:text-amber-400 mb-4 transition-colors"></i>
-                    <p class="text-base font-bold text-slate-300 group-hover:text-amber-400" id="fileNameFile">Drop file JSON/CSV ke sini</p>
+                    <p class="text-base font-bold text-slate-300 group-hover:text-amber-400">Drop file JSON/CSV</p>
                 </div>
             </form>
         </div>
@@ -331,12 +290,57 @@ exit;
 endif; 
 
 // ==========================================
-// DASHBOARD UTAMA (SETELAH KONEKSI BERHASIL)
+// DASHBOARD UTAMA
 // ==========================================
 $sessionConn = $_SESSION['db_connection'] ?? null;
 $driver = $sessionConn['driver'] ?? 'mysql';
 
 $dbManager = new DatabaseManager($pdo, $dbname, $driver);
+
+$tables = $dbManager->getTables();
+$relations = $dbManager->getRelations();
+$currentTable = $_GET['table'] ?? (!empty($tables) ? $tables[0] : null);
+$mode = $_GET['mode'] ?? 'join';
+
+$nativeCols = $currentTable ? getNativeColumns($pdo, $currentTable, $driver) : [];
+
+// FIX SQLITE NO-PK FALLBACK
+$primaryKeyColPHP = $currentTable ? $dbManager->getPrimaryKey($currentTable) : 'id';
+if (!$primaryKeyColPHP && !empty($nativeCols)) {
+    $primaryKeyColPHP = in_array('id', $nativeCols) ? 'id' : $nativeCols[0];
+}
+
+if (isset($_GET['action']) && $_GET['action'] === 'crud') {
+    if (ob_get_length()) ob_clean();
+    header('Content-Type: application/json');
+    try {
+        $op = $_POST['operation'];
+        $table = $_POST['table'];
+        
+        $pkCol = $dbManager->getPrimaryKey($table);
+        if (!$pkCol) {
+            $tCols = getNativeColumns($pdo, $table, $driver);
+            $pkCol = !empty($tCols) ? (in_array('id', $tCols) ? 'id' : $tCols[0]) : 'id';
+        }
+        
+        if ($op === 'delete') {
+            $dbManager->deleteRecord($table, $pkCol, $_POST['pkVal']);
+            echo json_encode(['success' => true]);
+        } elseif ($op === 'save') {
+            $data = json_decode($_POST['data'], true);
+            $pkVal = $_POST['pkVal'] ?? null;
+            if ($pkVal) {
+                $dbManager->updateRecord($table, $pkCol, $pkVal, $data);
+            } else {
+                $dbManager->insertRecord($table, $data);
+            }
+            echo json_encode(['success' => true]);
+        }
+    } catch (Exception $e) {
+        echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+    }
+    exit;
+}
 
 if (isset($_GET['action']) && $_GET['action'] === 'trace') {
     if (ob_get_length()) ob_clean(); 
@@ -360,11 +364,6 @@ if (isset($_GET['action']) && ($_GET['action'] === 'sqlite' || $_GET['action'] =
     die("Gagal mengekspor data.");
 }
 
-$tables = $dbManager->getTables();
-$relations = $dbManager->getRelations();
-$currentTable = $_GET['table'] ?? (!empty($tables) ? $tables[0] : null);
-$mode = $_GET['mode'] ?? 'join';
-
 $db_error = null;
 $query_status = "ok";
 $rows = [];
@@ -386,11 +385,8 @@ if ($currentTable) {
 
     if ($query !== "") {
         $result = $dbManager->fetchData($query);
-        if (isset($result['error'])) {
-            $db_error = $result['error'];
-        } else {
-            $rows = $result;
-        }
+        if (isset($result['error'])) $db_error = $result['error'];
+        else $rows = $result;
     }
 }
 ?>
@@ -404,7 +400,7 @@ if ($currentTable) {
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
         
         :root { 
             --theme-color: <?= $themeColor ?>; --theme-color-hover: <?= $themeHover ?>; --theme-bg-subtle: <?= $themeSubtle ?>; 
@@ -413,7 +409,6 @@ if ($currentTable) {
         }
         
         html { font-size: var(--app-font-scale); }
-
         body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: var(--bg-base); color: #e2e8f0; }
         .font-mono { font-family: 'JetBrains Mono', monospace; }
         .text-theme { color: var(--theme-color) !important; }
@@ -433,18 +428,63 @@ if ($currentTable) {
         @keyframes spin-anim { 0% { transform: rotate(-180deg) scale(0.5); opacity: 0; } 100% { transform: rotate(0deg) scale(1); opacity: 1; } }
         .spin-anim { animation: spin-anim 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
         
-        td { transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); position: relative; }
-        td:hover { background: var(--theme-bg-subtle); color: var(--theme-color); cursor: pointer; }
-        td::after { content: "\f002 Inspect"; font-family: 'Plus Jakarta Sans', 'Font Awesome 6 Free'; font-weight: 700; position: absolute; bottom: calc(100% + 4px); left: 50%; transform: translateX(-50%) translateY(5px); background: var(--theme-color); color: white; padding: 4px 10px; border-radius: 6px; font-size: 11px; opacity: 0; visibility: hidden; pointer-events: none; transition: all 0.2s ease; white-space: nowrap; z-index: 50; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.3); }
-        td::before { content: ""; position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%) translateY(5px); border-width: 4px; border-style: solid; border-color: var(--theme-color) transparent transparent transparent; opacity: 0; visibility: hidden; transition: all 0.2s ease; z-index: 50; }
-        td:hover::after, td:hover::before { opacity: 1; visibility: visible; transform: translateX(-50%) translateY(0); }
+        /* 🔥 OPTIMASI 1: Hilangkan 'transition: all' untuk mencegah Layout Thrashing / Lag */
+        td { transition: background-color 0.15s ease, color 0.15s ease; position: relative; }
         
+        /* 🔥 OPTIMASI 2: Animasi Pop-in untuk Lazy Tooltip */
+        @keyframes popInTooltip {
+            from { opacity: 0; transform: translate(-50%, 5px); }
+            to { opacity: 1; transform: translate(-50%, 0); }
+        }
+
+        /* 🔥 OPTIMASI 3: DRY (Don't Repeat Yourself) & Lazy Render.
+           Tooltip hanya diciptakan browser JIKA di-hover. Menghemat 10.000 nodes DOM! */
+        td.properties-trigger:hover::after, 
+        td.properties-trigger:hover::before {
+            position: absolute; left: 50%; z-index: 50; pointer-events: none;
+            animation: popInTooltip 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        }
+        td.properties-trigger:hover::after {
+            bottom: calc(100% + 4px); color: white; padding: 4px 10px; border-radius: 6px; 
+            font-size: 11px; font-weight: 900; font-family: 'Font Awesome 6 Free', sans-serif; 
+            white-space: nowrap; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.3);
+        }
+        td.properties-trigger:hover::before {
+            bottom: 100%; border-width: 4px; border-style: solid;
+        }
+
+        /* --- STATE 1: MODE INSPECT (Default) --- */
+        body:not(.editor-mode-active) td.properties-trigger:hover { 
+            cursor: pointer; color: var(--theme-color); background: var(--theme-bg-subtle); 
+        }
+        body:not(.editor-mode-active) td.properties-trigger:hover::after { 
+            content: "\f002 Inspect"; background: var(--theme-color); 
+        }
+        body:not(.editor-mode-active) td.properties-trigger:hover::before { 
+            content: ""; border-color: var(--theme-color) transparent transparent transparent; 
+        }
+        
+        /* --- STATE 2: MODE EDITOR --- */
+        body.editor-mode-active td.properties-trigger:hover { 
+            cursor: cell; color: #10b981; background: rgba(16, 185, 129, 0.15); 
+        }
+        body.editor-mode-active td.properties-trigger:hover::after { 
+            content: "\f044 Edit Baris"; background: #10b981; 
+        }
+        body.editor-mode-active td.properties-trigger:hover::before { 
+            content: ""; border-color: #10b981 transparent transparent transparent; 
+        }
+
         .glass-panel { background: rgba(30, 41, 59, 0.95); backdrop-filter: blur(20px); border: 1px solid var(--border-color); }
         .sidebar-link.active { background: var(--theme-bg-subtle); border-right: 3px solid var(--theme-color); color: var(--theme-color); font-weight: 600; }
         .sidebar-collapsed { width: 5rem !important; }
         .sidebar-collapsed .hide-on-collapse { display: none !important; }
         .sidebar-collapsed .show-on-collapse { display: flex !important; }
         .sidebar-collapsed .center-on-collapse { justify-content: center !important; padding-left: 0; padding-right: 0; }
+        
+        .properties-scroll::-webkit-scrollbar { width: 4px; height: 4px; }
+        .properties-scroll::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+        .properties-scroll::-webkit-scrollbar-thumb:hover { background: var(--theme-color); }
     </style>
     <style id="dynamicPinStyle"></style>
     
@@ -454,6 +494,8 @@ if ($currentTable) {
         document.documentElement.style.setProperty('--app-font-scale', savedFontSize + 'px');
         document.documentElement.style.setProperty('--cell-py', savedDensity.py);
         document.documentElement.style.setProperty('--cell-px', savedDensity.px);
+        
+        if(localStorage.getItem('voidDbEditorMode') === 'on') document.documentElement.classList.add('editor-mode-active-preload');
     </script>
 </head>
 <body class="flex h-screen overflow-hidden antialiased selection:bg-theme selection:text-white">
@@ -465,7 +507,6 @@ if ($currentTable) {
                 <button onclick="toggleSettings()" class="text-slate-400 hover:text-red-400"><i class="fa-solid fa-xmark fa-lg"></i></button>
             </div>
             <div class="p-6 space-y-8 overflow-y-auto">
-                
                 <?php if ($driver === 'mysql' && $sessionConn): ?>
                 <div>
                     <label class="text-xs text-slate-400 block mb-2 uppercase font-bold tracking-wider"><i class="fa-solid fa-user mr-1"></i> Informasi Profil</label>
@@ -480,14 +521,15 @@ if ($currentTable) {
                 <div>
                     <label class="text-xs text-slate-400 block mb-3 uppercase font-bold tracking-wider"><i class="fa-solid fa-palette mr-1"></i> Aksen Warna Tema</label>
                     <div class="flex flex-wrap gap-3 items-center">
-                        <button onclick="setTheme('#3b82f6')" class="w-8 h-8 rounded-full bg-blue-500 hover:scale-110 transition-transform shadow-md"></button>
-                        <button onclick="setTheme('#10b981')" class="w-8 h-8 rounded-full bg-emerald-500 hover:scale-110 transition-transform shadow-md"></button>
-                        <button onclick="setTheme('#8b5cf6')" class="w-8 h-8 rounded-full bg-violet-500 hover:scale-110 transition-transform shadow-md"></button>
-                        <button onclick="setTheme('#f43f5e')" class="w-8 h-8 rounded-full bg-rose-500 hover:scale-110 transition-transform shadow-md"></button>
-                        <button onclick="setTheme('#f59e0b')" class="w-8 h-8 rounded-full bg-amber-500 hover:scale-110 transition-transform shadow-md"></button>
-                        <button onclick="setTheme('#06b6d4')" class="w-8 h-8 rounded-full bg-cyan-500 hover:scale-110 transition-transform shadow-md"></button>
+                        <button onclick="setTheme('#3b82f6')" class="w-8 h-8 rounded-full bg-blue-500 shadow-md"></button>
+                        <button onclick="setTheme('#10b981')" class="w-8 h-8 rounded-full bg-emerald-500 shadow-md"></button>
+                        <button onclick="setTheme('#8b5cf6')" class="w-8 h-8 rounded-full bg-violet-500 shadow-md"></button>
+                        <button onclick="setTheme('#f43f5e')" class="w-8 h-8 rounded-full bg-rose-500 shadow-md"></button>
+                        <button onclick="setTheme('#f59e0b')" class="w-8 h-8 rounded-full bg-amber-500 shadow-md"></button>
+                        <button onclick="setTheme('#06b6d4')" class="w-8 h-8 rounded-full bg-cyan-500 shadow-md"></button>
+                        <button onclick="setTheme('#b5009a')" class="w-8 h-8 rounded-full bg-pink-500 shadow-md"></button>
                         <div class="h-6 w-px bg-slate-700 mx-1"></div>
-                        <div class="flex items-center gap-2 bg-slate-800 p-1.5 rounded-lg border border-slate-700 hover:border-slate-500 transition-colors">
+                        <div class="flex items-center gap-2 bg-slate-800 p-1.5 rounded-lg border border-slate-700">
                             <label for="colorPicker" class="text-xs font-bold text-slate-400 cursor-pointer pl-1"><i class="fa-solid fa-eye-dropper"></i> Custom</label>
                             <input type="color" id="colorPicker" value="<?= $themeColor ?>" class="w-6 h-6 rounded cursor-pointer border-0 p-0 bg-transparent" onchange="setTheme(this.value)">
                         </div>
@@ -523,37 +565,34 @@ if ($currentTable) {
                     </a>
                 </div>
             </div>
-        </div>
-    </div>
+            <footer class="border-t border-gray-200 dark:border-gray-800 py-2 text-sm pb-4">
+  <div class="max-w-6xl mx-auto px-4 flex items-center justify-center gap-2 text-gray-500 dark:text-gray-400">
+    
+    <span>Dibuat oleh</span>
+    
+    <span class="font-semibold text-gray-800 dark:text-gray-200">
+      Keidjaru Axiro
+    </span>
+    
+    <span class="opacity-40">•</span>
 
-    <div id="tracerModal" class="fixed inset-0 z-[100] hidden items-center justify-center p-2 md:p-4 bg-slate-900/90 backdrop-blur-md transition-opacity">
-        <div class="glass-panel w-full max-w-[98vw] lg:max-w-7xl h-[95vh] rounded-xl shadow-2xl flex flex-col overflow-hidden transform scale-95 transition-transform border border-slate-600" id="tracerContent">
-            <div class="p-4 border-b border-slate-700/50 flex flex-col gap-4 bg-slate-800/90">
-                <div class="flex justify-between items-start md:items-center">
-                    <div class="flex flex-col md:flex-row md:items-center gap-4">
-                        <button id="btnBackTracer" onclick="goBackTracer()" class="hidden px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white rounded-md transition-colors text-sm font-medium w-max"><i class="fa-solid fa-arrow-left mr-1"></i> Kembali</button>
-                        <div>
-                            <h3 class="text-lg font-bold text-white flex items-center gap-2"><i class="fa-solid fa-network-wired text-theme"></i> Deep Inspector</h3>
-                            <div id="tracerBreadcrumbs" class="flex items-center gap-2 mt-1 text-xs text-slate-400 font-mono overflow-x-auto max-w-[250px] md:max-w-3xl whitespace-nowrap"></div>
-                        </div>
-                    </div>
-                    <button onclick="closeTracer()" class="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:bg-red-500/20 hover:text-red-400 transition-colors"><i class="fa-solid fa-xmark fa-lg"></i></button>
-                </div>
-                <div class="flex flex-col md:flex-row justify-between md:items-center bg-slate-900/60 p-2 rounded-lg border border-slate-700/50 gap-3">
-                    <div class="flex gap-2 text-sm overflow-x-auto pb-1 md:pb-0" id="inspectorFilters">
-                        <button class="px-3 py-1.5 rounded-md bg-theme text-white font-medium filter-btn whitespace-nowrap shadow-sm" data-filter="all">Semua</button>
-                        <button class="px-3 py-1.5 rounded-md text-slate-400 hover:bg-slate-700 filter-btn flex gap-2 items-center whitespace-nowrap" data-filter="source_row"><i class="fa-solid fa-crosshairs hidden md:inline"></i> Utama <span id="badge-source" class="bg-slate-800 text-xs px-1.5 rounded">0</span></button>
-                        <button class="px-3 py-1.5 rounded-md text-slate-400 hover:bg-slate-700 filter-btn flex gap-2 items-center whitespace-nowrap" data-filter="row_relations"><i class="fa-solid fa-link hidden md:inline"></i> Relasi <span id="badge-row" class="bg-slate-800 text-xs px-1.5 rounded">0</span></button>
-                        <button class="px-3 py-1.5 rounded-md text-slate-400 hover:bg-slate-700 filter-btn flex gap-2 items-center whitespace-nowrap" data-filter="global_matches"><i class="fa-solid fa-globe hidden md:inline"></i> Global <span id="badge-global" class="bg-slate-800 text-xs px-1.5 rounded">0</span></button>
-                    </div>
-                    <div class="flex bg-slate-800 rounded-md p-1 border border-slate-700 shrink-0">
-                        <button onclick="changeTracerMode('raw')" id="tracerModeRaw" class="px-3 py-1 rounded text-xs font-bold bg-theme text-white"><i class="fa-solid fa-table mr-1"></i> Raw</button>
-                        <button onclick="changeTracerMode('join')" id="tracerModeJoin" class="px-3 py-1 rounded text-xs font-bold text-slate-400 hover:text-white"><i class="fa-solid fa-object-group mr-1"></i> Join</button>
-                    </div>
-                </div>
-            </div>
-            <div class="p-4 md:p-6 overflow-y-auto overflow-x-hidden flex-1 font-mono text-sm space-y-6 bg-[#0f172a]" id="tracerBody"></div>
+    <a 
+      href="https://github.com/KeiAxiro"
+      target="_blank"
+      class="flex items-center gap-1 hover:text-indigo-500 transition-colors"
+    >
+      <svg xmlns="http://www.w3.org/2000/svg" 
+           viewBox="0 0 24 24" 
+           class="w-4 h-4 fill-current">
+        <path d="M12 .5C5.73.5.99 5.24.99 11.5c0 4.86 3.15 8.98 7.52 10.44.55.1.75-.24.75-.53 0-.26-.01-.96-.02-1.88-3.06.66-3.71-1.48-3.71-1.48-.5-1.27-1.23-1.6-1.23-1.6-1-.69.08-.68.08-.68 1.11.08 1.7 1.14 1.7 1.14.99 1.7 2.6 1.21 3.24.93.1-.72.39-1.21.71-1.49-2.44-.28-5-1.22-5-5.43 0-1.2.43-2.18 1.14-2.95-.11-.28-.5-1.43.11-2.98 0 0 .94-.3 3.08 1.13A10.7 10.7 0 0112 6.8c.95 0 1.91.13 2.81.39 2.14-1.44 3.08-1.13 3.08-1.13.61 1.55.22 2.7.11 2.98.71.77 1.14 1.75 1.14 2.95 0 4.22-2.57 5.14-5.02 5.42.4.34.76 1.01.76 2.04 0 1.47-.01 2.66-.01 3.02 0 .29.2.64.76.53 4.37-1.46 7.52-5.58 7.52-10.44C23.01 5.24 18.27.5 12 .5z"/>
+      </svg>
+      <span>KeiAxiro</span>
+    </a>
+
+  </div>
+</footer>
         </div>
+        
     </div>
 
     <aside id="appSidebar" class="w-64 bg-[#1e293b] border-r border-slate-700 flex flex-col z-40 shrink-0 shadow-xl transition-all duration-300 absolute md:relative inset-y-0 left-0 -translate-x-full md:translate-x-0">
@@ -595,23 +634,13 @@ if ($currentTable) {
                     <span class="truncate"><?= htmlspecialchars($t) ?></span>
                 </a>
             <?php endforeach; ?>
-            
-            <div class="px-5 mt-auto pt-4 border-t border-slate-700">
-                <p class="text-[10px] text-slate-500 uppercase font-bold tracking-widest mb-2">Metadata Stats</p>
-                <div class="flex items-center justify-between text-[11px] text-slate-400">
-                    <span>Relasi Terdeteksi:</span>
-                    <span class="font-mono text-theme"><?= count($relations) ?></span>
-                </div>
-            </div>
         </div>
     </aside>
 
     <div id="sidebarOverlay" class="fixed inset-0 bg-black/50 z-30 hidden md:hidden backdrop-blur-sm" onclick="toggleSidebarMobile()"></div>
 
     <main class="flex-1 flex flex-col min-w-0 bg-[#0f172a] relative h-screen">
-        
         <header class="bg-[#1e293b] border-b border-slate-700 shadow-sm z-[70] relative shrink-0 h-[72px] md:h-auto flex flex-col justify-center">
-            
             <div id="mobileHeaderNormal" class="px-4 py-2 md:p-5 flex flex-1 flex-row justify-between items-center gap-4 transition-all">
                 <div class="flex items-center gap-3 min-w-0 w-full md:w-auto">
                     <button onclick="toggleSidebarMobile()" class="md:hidden text-slate-400 hover:text-white p-2 -ml-2 rounded-lg hover:bg-slate-800 transition-colors"><i class="fa-solid fa-bars fa-lg"></i></button>
@@ -627,20 +656,26 @@ if ($currentTable) {
                 </button>
 
                 <div class="hidden md:flex items-center gap-2 md:gap-3 shrink-0 ml-auto">
+                    <button id="btnAddRecordDesk" onclick="openPropertiesModal(null, null, null)" class="hidden px-3 py-1.5 md:py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs md:text-sm font-medium transition-all shadow-sm items-center gap-2 shrink-0 border border-emerald-500/50 mr-2">
+                        <i class="fa-solid fa-plus"></i> <span class="hidden xl:inline">Data Baru</span>
+                    </button>
+                    <button id="btnToggleEditorDesk" onclick="toggleGlobalEditorMode()" class="px-4 py-1.5 md:py-2 bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-lg text-xs md:text-sm font-medium transition-colors flex items-center gap-2 shadow-sm shrink-0 mr-2 text-slate-400">
+                        <i class="fa-solid fa-toggle-off text-lg" id="iconEditorDesk"></i> <span class="hidden lg:inline">Editor Mode</span>
+                    </button>
+
+
                     <div class="relative group shrink-0">
                         <i class="fa-solid fa-magnifying-glass absolute left-3 top-2.5 text-slate-500 group-focus-within:text-theme transition-colors text-xs md:text-sm"></i>
-                        <input type="text" id="globalSearchDesk" placeholder="Cari data..." class="pl-8 pr-3 py-1.5 md:py-2 bg-slate-900 border border-slate-700 focus:border-theme rounded-lg text-xs md:text-sm outline-none text-slate-200 transition-all w-32 md:w-56 focus:w-48 md:focus:w-72 shadow-inner">
+                        <input type="text" id="globalSearchDesk" placeholder="Cari data..." class="pl-8 pr-3 py-1.5 md:py-2 bg-slate-900 border border-slate-700 focus:border-theme rounded-lg text-xs md:text-sm outline-none text-slate-200 transition-all w-32 md:w-48 xl:focus:w-72 lg:focus:w-56 shadow-inner">
                     </div>
+                    
                     <div class="relative group shrink-0">
                         <button class="px-3 md:px-4 py-1.5 md:py-2 bg-slate-800 border border-slate-600 hover:border-slate-500 rounded-lg text-xs md:text-sm transition-colors flex items-center gap-2 text-slate-200 shadow-sm">
-                            <i class="fa-solid fa-eye-slash text-slate-400"></i> <span class="hidden md:inline">Kolom</span>
+                            <i class="fa-solid fa-eye-slash text-slate-400"></i> <span class="hidden xl:inline">Kolom</span>
                         </button>
                         <div class="absolute right-0 mt-2 w-56 md:w-64 bg-slate-800 border border-slate-700 rounded-lg shadow-2xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all p-2 flex flex-col gap-1 max-h-60 overflow-y-auto z-[100]" id="columnToggles"></div>
                     </div>
                     
-                    <a href="?action=sqlite&table=<?= urlencode($currentTable) ?>" class="px-3 md:px-4 py-1.5 md:py-2 bg-slate-800 border border-slate-600 hover-border-theme hover-bg-theme text-slate-200 rounded-lg text-xs md:text-sm font-medium transition-all flex items-center gap-2 shadow-sm shrink-0">
-                        <i class="fa-solid fa-download"></i> <span class="hidden lg:inline">.sqlite</span>
-                    </a>
                     <div class="flex bg-slate-900 rounded-lg p-1 border border-slate-700 shadow-inner shrink-0">
                         <a href="?table=<?= urlencode($currentTable) ?>&mode=raw" class="px-3 md:px-4 py-1 md:py-1.5 rounded-md text-xs md:text-sm transition-colors <?= $mode === 'raw' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500 hover:text-white' ?>"><i class="fa-solid fa-cube md:mr-1"></i> <span class="hidden md:inline">Raw</span></a>
                         <a href="?table=<?= urlencode($currentTable) ?>&mode=join" class="px-3 md:px-4 py-1 md:py-1.5 rounded-md text-xs md:text-sm transition-colors <?= $mode === 'join' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500 hover:text-white' ?>"><i class="fa-solid fa-link md:mr-1"></i> <span class="hidden md:inline">Joined</span></a>
@@ -661,10 +696,7 @@ if ($currentTable) {
             <div class="px-4 md:px-6 pt-4 z-10 relative">
                 <div class="bg-red-500/10 border border-red-500/50 text-red-400 p-4 rounded-xl flex items-start gap-3 shadow-lg">
                     <i class="fa-solid fa-triangle-exclamation text-xl mt-0.5"></i>
-                    <div>
-                        <h4 class="font-bold text-sm">Error Pembacaan Data</h4>
-                        <p class="text-xs mt-1 font-mono opacity-80"><?= htmlspecialchars($db_error) ?></p>
-                    </div>
+                    <div><h4 class="font-bold text-sm">Error Pembacaan Data</h4><p class="text-xs mt-1 font-mono opacity-80"><?= htmlspecialchars($db_error) ?></p></div>
                 </div>
             </div>
         <?php elseif ($query_status === "no_relation"): ?>
@@ -676,7 +708,7 @@ if ($currentTable) {
             </div>
         <?php endif; ?>
 
-        <div class="p-4 md:p-6 flex-1 min-h-0 relative flex flex-col z-10">
+        <div class="pt-2 pl-2 pr-2 md:pl-4 md:pr-4 md:pt-4 flex-1 min-h-0 relative flex flex-col z-10">
             <div class="overflow-auto rounded-xl border border-slate-700 bg-[#1e293b] shadow-lg relative flex-1">
                 <table class="w-full text-left border-collapse whitespace-nowrap" id="dataTable">
                     <?php if (!empty($rows)): ?>
@@ -698,15 +730,17 @@ if ($currentTable) {
                             </tr>
                         </thead>
                         <tbody class="text-xs md:text-sm divide-y divide-slate-700/50 font-mono text-slate-300">
-                            <?php foreach ($rows as $row): ?>
-                                <tr class="hover:bg-slate-800/80 transition-colors data-row">
+                            <?php foreach ($rows as $row): 
+                                $safeRowData = htmlspecialchars(json_encode($row, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE), ENT_QUOTES, 'UTF-8');
+                            ?>
+                                <tr class="hover:bg-slate-800/80 transition-colors data-row" data-row="<?= $safeRowData ?>">
                                     <?php 
                                     $colKeys = array_keys($row);
                                     $colIndex = 0;
                                     foreach ($row as $cell): 
-                                        $colName = $colKeys[$colIndex];
+                                        $colName = htmlspecialchars($colKeys[$colIndex], ENT_QUOTES, 'UTF-8');
                                     ?>
-                                        <td class="cell-pad traceable" onclick="startTrace('<?= htmlspecialchars($currentTable) ?>', '<?= htmlspecialchars($colName) ?>', '<?= htmlspecialchars($cell ?? '') ?>')">
+                                        <td class="cell-pad properties-trigger" onclick="handleCellClick(this, '<?= $colName ?>')">
                                             <?= ($cell === null) ? '<span class="text-slate-600 italic">NULL</span>' : htmlspecialchars($cell) ?>
                                         </td>
                                     <?php $colIndex++; endforeach; ?>
@@ -720,31 +754,70 @@ if ($currentTable) {
             </div>
         </div>
 
+<footer class="border-t border-gray-200 dark:border-gray-800 py-2 text-sm">
+  <div class="max-w-6xl mx-auto px-4 flex items-center justify-center gap-2 text-gray-500 dark:text-gray-400">
+    
+    <span>Dibuat oleh</span>
+    
+    <span class="font-semibold text-gray-800 dark:text-gray-200">
+      Keidjaru Axiro
+    </span>
+    
+    <span class="opacity-40">•</span>
+
+    <a 
+      href="https://github.com/KeiAxiro"
+      target="_blank"
+      class="flex items-center gap-1 hover:text-indigo-500 transition-colors"
+    >
+      <svg xmlns="http://www.w3.org/2000/svg" 
+           viewBox="0 0 24 24" 
+           class="w-4 h-4 fill-current">
+        <path d="M12 .5C5.73.5.99 5.24.99 11.5c0 4.86 3.15 8.98 7.52 10.44.55.1.75-.24.75-.53 0-.26-.01-.96-.02-1.88-3.06.66-3.71-1.48-3.71-1.48-.5-1.27-1.23-1.6-1.23-1.6-1-.69.08-.68.08-.68 1.11.08 1.7 1.14 1.7 1.14.99 1.7 2.6 1.21 3.24.93.1-.72.39-1.21.71-1.49-2.44-.28-5-1.22-5-5.43 0-1.2.43-2.18 1.14-2.95-.11-.28-.5-1.43.11-2.98 0 0 .94-.3 3.08 1.13A10.7 10.7 0 0112 6.8c.95 0 1.91.13 2.81.39 2.14-1.44 3.08-1.13 3.08-1.13.61 1.55.22 2.7.11 2.98.71.77 1.14 1.75 1.14 2.95 0 4.22-2.57 5.14-5.02 5.42.4.34.76 1.01.76 2.04 0 1.47-.01 2.66-.01 3.02 0 .29.2.64.76.53 4.37-1.46 7.52-5.58 7.52-10.44C23.01 5.24 18.27.5 12 .5z"/>
+      </svg>
+      <span>KeiAxiro</span>
+    </a>
+
+  </div>
+</footer>
+
         <div class="md:hidden fixed bottom-6 right-6 z-[60]">
-            <button id="fabBtn" class="w-14 h-14 bg-theme text-white rounded-full shadow-[0_4px_15px_rgba(0,0,0,0.5)] flex items-center justify-center text-xl hover:scale-105 transition-transform" onclick="toggleMobileTools()">
+            <button id="fabBtn" class="w-14 h-14 bg-theme text-white rounded-full shadow-[0_4px_15px_rgba(0,0,0,0.5)] flex items-center justify-center text-xl hover:scale-105 transition-transform" onclick="toggleMobileTools(true)">
                 <i class="fa-solid fa-screwdriver-wrench"></i>
             </button>
         </div>
 
-        <div id="mobileToolsOverlay" class="fixed inset-0 bg-black/60 z-[65] hidden backdrop-blur-sm" onclick="toggleMobileTools()"></div>
+        <div id="mobileToolsOverlay" class="fixed inset-0 bg-black/60 z-[65] hidden backdrop-blur-sm" onclick="toggleMobileTools(false)"></div>
         
         <div id="mobileToolsSheet" class="fixed inset-x-0 bottom-0 z-[70] translate-y-full transition-transform duration-300 ease-out bg-[#1e293b] rounded-t-3xl shadow-[0_-10px_40px_rgba(0,0,0,0.5)] border-t border-slate-700 flex flex-col max-h-[85vh]">
-            <div class="p-5 border-b border-slate-700 flex justify-between items-center bg-slate-800/50 rounded-t-3xl">
+            <div class="p-5 border-b border-slate-700 flex justify-between items-center bg-slate-800/50 rounded-t-3xl shrink-0">
                 <h3 class="font-bold text-white text-lg"><i class="fa-solid fa-sliders text-theme mr-2"></i> Alat Tabel</h3>
-                <button onclick="toggleMobileTools()" class="text-slate-400 p-2 hover:text-red-400 bg-slate-800 rounded-lg"><i class="fa-solid fa-xmark fa-lg"></i></button>
+                <button onclick="toggleMobileTools(false)" class="text-slate-400 p-2 hover:text-red-400 bg-slate-800 rounded-lg"><i class="fa-solid fa-xmark fa-lg"></i></button>
             </div>
             <div class="p-5 overflow-y-auto space-y-6">
                 <div>
-                    <label class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3 block"><i class="fa-solid fa-eye mr-1"></i> Mode Tampilan</label>
+                    <label class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3 block"><i class="fa-solid fa-power-off mr-1"></i> Editor Mode</label>
+                    <button id="btnToggleEditorMob" onclick="toggleGlobalEditorMode()" class="w-full py-3 bg-slate-800 border border-slate-600 rounded-lg text-sm font-bold transition-colors flex items-center justify-center gap-2 shadow-sm text-slate-400">
+                        <i class="fa-solid fa-toggle-off text-xl" id="iconEditorMob"></i> <span id="textEditorMob">Mode Editor: Nonaktif</span>
+                    </button>
+                </div>
+                <div id="containerAddRecordMob" class="hidden">
+                    <label class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3 block"><i class="fa-solid fa-plus mr-1"></i> Tambah Data Baru</label>
+                    <button onclick="openPropertiesModal(null, null, null); toggleMobileTools(false);" class="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2 shadow-sm border border-emerald-500/50">
+                        <i class="fa-solid fa-plus"></i> Form Tambah Data
+                    </button>
+                </div>
+<div>
+                    <label class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3 block"><i class="fa-solid fa-eye mr-1"></i> Mode Tampilan Data</label>
                     <div class="flex bg-slate-900 rounded-lg p-1.5 border border-slate-700 shadow-inner w-full">
-                        <a href="?table=<?= urlencode($currentTable) ?>&mode=raw" class="flex-1 text-center py-2 rounded-md text-sm font-bold transition-colors <?= $mode === 'raw' ? 'bg-theme text-white shadow-sm' : 'text-slate-500' ?>"><i class="fa-solid fa-cube mr-1"></i> Raw</a>
-                        <a href="?table=<?= urlencode($currentTable) ?>&mode=join" class="flex-1 text-center py-2 rounded-md text-sm font-bold transition-colors <?= $mode === 'join' ? 'bg-theme text-white shadow-sm' : 'text-slate-500' ?>"><i class="fa-solid fa-link mr-1"></i> Joined</a>
+                        <a href="?table=<?= urlencode($currentTable) ?>&mode=raw" onclick="localStorage.setItem('voidDbFabState', 'open');" class="flex-1 text-center py-2 rounded-md text-sm font-bold transition-colors <?= $mode === 'raw' ? 'bg-theme text-white shadow-sm' : 'text-slate-500' ?>"><i class="fa-solid fa-cube mr-1"></i> Raw</a>
+                        <a href="?table=<?= urlencode($currentTable) ?>&mode=join" onclick="localStorage.setItem('voidDbFabState', 'open');" class="flex-1 text-center py-2 rounded-md text-sm font-bold transition-colors <?= $mode === 'join' ? 'bg-theme text-white shadow-sm' : 'text-slate-500' ?>"><i class="fa-solid fa-link mr-1"></i> Joined</a>
                     </div>
                 </div>
                 <div>
                     <label class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3 block"><i class="fa-solid fa-download mr-1"></i> Ekspor Data</label>
                     <a href="?action=sqlite&table=<?= urlencode($currentTable) ?>" class="w-full py-3 bg-slate-800 border border-slate-600 text-slate-200 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2 shadow-sm">
-                        <i class="fa-solid fa-file-arrow-down text-theme"></i> Download Tabel (.sqlite)
+                        <i class="fa-solid fa-file-arrow-down text-theme"></i> Download (.sqlite)
                     </a>
                 </div>
                 <div>
@@ -755,69 +828,543 @@ if ($currentTable) {
         </div>
     </main>
 
+    <div id="propertiesModal" class="fixed inset-0 z-[130] hidden items-center justify-center bg-slate-900/90 backdrop-blur-md transition-opacity">
+        <div class="bg-[#1e293b] border border-slate-600 w-full h-full md:max-w-[95vw] lg:max-w-7xl md:h-[90vh] md:rounded-2xl shadow-2xl flex flex-col overflow-hidden transform scale-95 transition-transform duration-200" id="propertiesModalContent">
+            
+            <div class="p-4 md:p-5 border-b border-slate-700/50 flex flex-col md:flex-row md:justify-between items-start md:items-center bg-slate-800/90 shrink-0 gap-3 md:gap-0">
+                <div class="flex items-center gap-3 w-full md:w-auto justify-between md:justify-start">
+                    <div>
+                        <h3 class="text-lg md:text-xl font-bold text-white flex items-center gap-2"><i class="fa-solid fa-sliders text-theme"></i> Row Properties</h3>
+<p class="text-xs text-slate-400 font-mono mt-0.5 ml-7 flex items-center flex-wrap">
+    Target: <span class="text-emerald-400 ml-1" id="propTargetTable"><?= htmlspecialchars($currentTable) ?></span>
+    <span id="propTargetCell" class="hidden text-slate-500 ml-2 tracking-wide"></span>
+</p>
+                    </div>
+                    <button onclick="closePropertiesModal()" class="md:hidden text-slate-400 hover:text-red-400 transition-colors bg-slate-900 p-2 rounded-lg border border-slate-700"><i class="fa-solid fa-xmark fa-lg"></i></button>
+                </div>
+                
+                <div class="flex md:hidden w-full bg-slate-900 p-1 rounded-lg border border-slate-700">
+                    <button onclick="switchPropertiesTab('editor')" id="tabBtnEditor" class="flex-1 py-1.5 text-xs font-bold rounded-md bg-theme text-white shadow-sm"><i class="fa-solid fa-pen-to-square"></i> Editor</button>
+                    <button onclick="switchPropertiesTab('inspector')" id="tabBtnInspector" class="flex-1 py-1.5 text-xs font-bold rounded-md text-slate-400 hover:text-white transition-colors"><i class="fa-solid fa-network-wired"></i> Inspector</button>
+                </div>
+
+                <div class="hidden md:flex gap-3">
+                    <button onclick="closePropertiesModal()" class="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 bg-slate-900 border border-slate-700 hover:bg-red-500/20 hover:text-red-400 hover:border-red-500/50 transition-colors"><i class="fa-solid fa-xmark fa-lg"></i></button>
+                </div>
+            </div>
+
+            <div class="flex-1 overflow-hidden flex flex-col md:flex-row relative">
+                <div id="paneEditor" class="w-full md:w-2/5 lg:w-1/3 flex flex-col border-r border-slate-700 bg-[#1e293b] absolute md:relative inset-0 z-20 md:z-auto transition-transform duration-300" style="transform: translateX(0);">
+                    <div class="p-4 bg-slate-800/50 border-b border-slate-700 shrink-0 flex justify-between items-center">
+                        <h4 class="font-bold text-sm text-slate-300 uppercase tracking-widest flex items-center gap-2"><i class="fa-solid fa-database text-emerald-400"></i> Data Record</h4>
+                        
+                        <button onclick="toggleGlobalEditorMode()" id="editorStatusBadge" title="Klik untuk On/Off Mode Editor" class="text-[10px] bg-amber-500/20 hover:bg-amber-500/30 text-amber-500 px-2.5 py-1 rounded border border-amber-500/50 font-bold tracking-widest uppercase transition-colors flex items-center gap-1.5 shadow-sm">
+                            <i class='fa-solid fa-toggle-off text-sm'></i> Read Only
+                        </button>
+                    </div>
+                    
+                    <div class="flex-1 p-5 overflow-y-auto properties-scroll" id="editorFormContainer"></div>
+                    
+                    <div class="p-4 border-t border-slate-700 bg-slate-900/50 flex flex-wrap gap-2 shrink-0 hidden" id="editorActionFooter">
+                        <button id="editorBtnDelete" class="px-3 py-2 bg-red-500/10 text-red-400 border border-red-500/30 hover:bg-red-500 hover:text-white rounded-lg text-xs font-bold transition-colors hidden items-center gap-2 flex-1 md:flex-none justify-center"><i class="fa-solid fa-trash"></i> Hapus</button>
+                        <button onclick="saveEditorRecord()" class="px-4 py-2 bg-emerald-600 text-white rounded-lg text-xs font-bold hover:bg-emerald-500 transition-all shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-2 flex-1"><i class="fa-solid fa-save"></i> Simpan Perubahan</button>
+                    </div>
+                </div>
+
+                <div id="paneInspector" class="w-full md:w-3/5 lg:w-2/3 flex flex-col bg-[#0f172a] absolute md:relative inset-0 z-10 md:z-auto transition-transform duration-300" style="transform: translateX(100%);">
+                    <div class="p-3 md:p-4 bg-slate-800/80 border-b border-slate-700 flex flex-col gap-3 shrink-0">
+                        <div class="flex items-center gap-3">
+                            <button id="btnBackTracer" onclick="goBackTracer()" class="hidden px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-white rounded-md transition-colors text-xs font-medium shrink-0"><i class="fa-solid fa-arrow-left"></i> Back</button>
+                            <div id="tracerBreadcrumbs" class="flex items-center gap-2 text-[10px] md:text-xs text-slate-400 font-mono overflow-x-auto whitespace-nowrap properties-scroll pb-1 md:pb-0"></div>
+                        </div>
+                        <div class="flex flex-col xl:flex-row xl:items-center justify-between gap-3">
+                            <div class="flex flex-wrap gap-2 text-xs" id="inspectorFilters">
+                                <button class="px-2.5 py-1 rounded-md bg-theme text-white font-medium filter-btn shadow-sm" data-filter="all">Semua</button>
+                                <button class="px-2.5 py-1 rounded-md text-slate-400 hover:bg-slate-700 filter-btn flex gap-1.5 items-center" data-filter="source_row"><i class="fa-solid fa-crosshairs"></i> Utama <span id="badge-source" class="bg-slate-800 text-[10px] px-1 rounded">0</span></button>
+                                <button class="px-2.5 py-1 rounded-md text-slate-400 hover:bg-slate-700 filter-btn flex gap-1.5 items-center" data-filter="row_relations"><i class="fa-solid fa-link"></i> Relasi <span id="badge-row" class="bg-slate-800 text-[10px] px-1 rounded">0</span></button>
+                                <button class="px-2.5 py-1 rounded-md text-slate-400 hover:bg-slate-700 filter-btn flex gap-1.5 items-center" data-filter="global_matches"><i class="fa-solid fa-globe"></i> Global <span id="badge-global" class="bg-slate-800 text-[10px] px-1 rounded">0</span></button>
+                            </div>
+                            
+                            <div class="flex bg-slate-900 rounded-md p-1 border border-slate-700 shrink-0 w-max ml-auto xl:ml-0">
+                                <button onclick="changeTracerMode('raw')" id="tracerModeRaw" class="px-3 py-1 rounded text-[10px] md:text-xs font-bold bg-theme text-white shadow-sm"><i class="fa-solid fa-table"></i> Raw</button>
+                                <button onclick="changeTracerMode('join')" id="tracerModeJoin" class="px-3 py-1 rounded text-[10px] md:text-xs font-bold text-slate-400 hover:text-white transition-colors"><i class="fa-solid fa-object-group"></i> Join</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="flex-1 overflow-y-auto properties-scroll p-4 md:p-6" id="tracerBody">
+                        <div class="flex flex-col items-center justify-center h-full text-slate-500 opacity-50"><i class="fa-solid fa-network-wired text-6xl mb-4"></i><p class="text-sm">Klik sebuah sel untuk melacak relasi datanya.</p></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script>
+        // --- 0. STATE EDITOR MODE (GLOBAL) ---
+        let isEditorActive = localStorage.getItem('voidDbEditorMode') === 'on';
+        let currentEditRowData = null; // Menyimpan baris yg sedang diedit
+        const activeTable = "<?= htmlspecialchars($currentTable ?? '') ?>";
+        const primaryKeyCol = "<?= htmlspecialchars($primaryKeyColPHP) ?>";
+        const nativeCols = <?= json_encode($nativeCols ?? []) ?>;
+
+document.addEventListener('DOMContentLoaded', () => {
+            applyEditorModeState();
+            
+            // [BARU] Logika Pemulihan FAB Sheet yang Lebih Kuat
+            if(localStorage.getItem('voidDbFabState') === 'open') {
+                const sheet = document.getElementById('mobileToolsSheet');
+                const overlay = document.getElementById('mobileToolsOverlay');
+                
+                // Matikan class animasi bawaan tailwind sesaat
+                sheet.classList.remove('transition-transform', 'duration-300'); 
+                
+                // Setel posisi ke terbuka
+                sheet.classList.remove('translate-y-full'); 
+                overlay.classList.remove('hidden');
+                
+                // Nyalakan kembali animasinya setelah halaman selesai di-render
+                setTimeout(() => {
+                    sheet.classList.add('transition-transform', 'duration-300');
+                }, 50);
+            }
+
+            if(window.innerWidth >= 768) {
+                document.getElementById('paneEditor').style.transform = 'none';
+                document.getElementById('paneInspector').style.transform = 'none';
+            }
+        });
+
+        function toggleGlobalEditorMode() {
+            isEditorActive = !isEditorActive;
+            localStorage.setItem('voidDbEditorMode', isEditorActive ? 'on' : 'off');
+            applyEditorModeState();
+        }
+
+        function applyEditorModeState() {
+            const btnDesk = document.getElementById('btnToggleEditorDesk'), iconDesk = document.getElementById('iconEditorDesk'), btnAddDesk = document.getElementById('btnAddRecordDesk');
+            if (btnDesk) {
+                if (isEditorActive) {
+                    btnDesk.className = "px-4 py-1.5 md:py-2 bg-slate-900 border border-emerald-500/50 rounded-lg text-xs md:text-sm font-bold transition-colors flex items-center gap-2 shadow-sm shrink-0 mr-2 text-emerald-400";
+                    iconDesk.className = "fa-solid fa-toggle-on text-lg";
+                    btnAddDesk.classList.remove('hidden'); btnAddDesk.classList.add('flex');
+                } else {
+                    btnDesk.className = "px-4 py-1.5 md:py-2 bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-lg text-xs md:text-sm font-medium transition-colors flex items-center gap-2 shadow-sm shrink-0 mr-2 text-slate-400";
+                    iconDesk.className = "fa-solid fa-toggle-off text-lg";
+                    btnAddDesk.classList.add('hidden'); btnAddDesk.classList.remove('flex');
+                }
+            }
+
+            const btnMob = document.getElementById('btnToggleEditorMob'), iconMob = document.getElementById('iconEditorMob'), textMob = document.getElementById('textEditorMob'), containerAddMob = document.getElementById('containerAddRecordMob');
+            if (btnMob) {
+                if (isEditorActive) {
+                    btnMob.className = "w-full py-3 bg-slate-900 border border-emerald-500/50 rounded-lg text-sm font-bold transition-colors flex items-center justify-center gap-2 shadow-sm text-emerald-400";
+                    iconMob.className = "fa-solid fa-toggle-on text-xl"; textMob.innerText = "Mode Editor: Aktif";
+                    containerAddMob.classList.remove('hidden');
+                } else {
+                    btnMob.className = "w-full py-3 bg-slate-800 border border-slate-600 rounded-lg text-sm font-bold transition-colors flex items-center justify-center gap-2 shadow-sm text-slate-400";
+                    iconMob.className = "fa-solid fa-toggle-off text-xl"; textMob.innerText = "Mode Editor: Nonaktif";
+                    containerAddMob.classList.add('hidden');
+                }
+            }
+
+            // Memperbarui Badge (Chip) toggle di dalam Jendela Properties
+            const badgeStatus = document.getElementById('editorStatusBadge');
+            if (badgeStatus) {
+                if (isEditorActive) {
+                    badgeStatus.className = "text-[10px] bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 px-2.5 py-1 rounded border border-emerald-500/50 font-bold tracking-widest uppercase transition-colors flex items-center gap-1.5 shadow-sm";
+                    badgeStatus.innerHTML = "<i class='fa-solid fa-toggle-on text-sm'></i> Editing";
+                } else {
+                    badgeStatus.className = "text-[10px] bg-amber-500/20 hover:bg-amber-500/30 text-amber-500 px-2.5 py-1 rounded border border-amber-500/50 font-bold tracking-widest uppercase transition-colors flex items-center gap-1.5 shadow-sm";
+                    badgeStatus.innerHTML = "<i class='fa-solid fa-toggle-off text-sm'></i> Read Only";
+                }
+            }
+            
+            // Jika modal Properties sedang terbuka, otomatis render ulang form agar bisa diketik / dilock!
+            const propModal = document.getElementById('propertiesModal');
+            if (propModal && !propModal.classList.contains('hidden')) {
+                updateEditorPane(currentEditTable, currentEditRowData);
+            }
+            
+            if (isEditorActive) {
+                document.body.classList.add('editor-mode-active');
+                document.documentElement.classList.remove('editor-mode-active-preload');
+            } else {
+                document.body.classList.remove('editor-mode-active');
+                document.documentElement.classList.remove('editor-mode-active-preload');
+            }
+        }
+
+        // --- 1. HANDLING ROW CLICKS & PROPERTIES MODAL ---
+        let currentEditPkVal = null;
+        let currentEditTable = activeTable;
+
+        const escapeHTML = (str) => {
+            if(str === null || str === undefined) return '';
+            return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+        };
+        const unEscapeHTML = (str) => {
+            return String(str).replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#039;/g, "'");
+        };
+
+        function handleCellClick(td, clickedColName) {
+            const tr = td.closest('tr');
+            if (!tr.dataset.row) return;
+            const rowData = JSON.parse(tr.dataset.row);
+            openPropertiesModal(clickedColName, rowData[clickedColName], rowData, activeTable);
+        }
+
+        function updateEditorPane(tableName, rowData) {
+            currentEditTable = tableName;
+            currentEditRowData = rowData; // Simpan untuk referensi saat mode editor di-toggle
+            document.getElementById('propTargetTable').innerText = tableName;
+            
+            const container = document.getElementById('editorFormContainer');
+            const btnDelete = document.getElementById('editorBtnDelete');
+            const footerAction = document.getElementById('editorActionFooter');
+
+            let html = '<form id="editorForm" class="space-y-4 flex flex-col">';
+            
+            let guessedPkCol = primaryKeyCol;
+            if (tableName !== activeTable && rowData) guessedPkCol = rowData['id'] !== undefined ? 'id' : Object.keys(rowData)[0];
+
+            const buildInput = (col, val, isPk, isNative) => {
+                const safeVal = escapeHTML(val);
+                const isLongText = String(val).length > 50;
+                let locked = !isNative || (isPk && rowData !== null);
+                let badgeHtml = !isNative ? '<span class="text-blue-400 text-[9px] px-1.5 py-0.5 rounded border border-blue-400/30 bg-blue-400/10 ml-2 uppercase tracking-widest">[Joined]</span>' : (isPk && rowData !== null ? '<span class="text-red-400 text-[9px] px-1.5 py-0.5 rounded border border-red-400/30 bg-red-400/10 ml-2 uppercase tracking-widest">[PK]</span>' : '');
+                
+                const finalReadonly = locked || !isEditorActive;
+                const baseClass = finalReadonly ? 'w-full bg-slate-900/50 border border-slate-700/50 rounded-lg px-3 py-2 text-sm text-slate-500 cursor-not-allowed font-mono shadow-inner outline-none' : 'w-full bg-[#0f172a] border border-slate-600 rounded-lg px-3 py-2 text-sm text-white focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none transition-all font-mono placeholder-slate-600';
+                
+                let inputHtml = (isLongText && !finalReadonly) ? `<textarea name="${col}" rows="3" class="${baseClass}">${safeVal}</textarea>` : `<input type="text" ${isNative ? `name="${col}"` : ''} value="${safeVal}" ${finalReadonly ? 'readonly tabindex="-1"' : ''} class="${baseClass}" placeholder="${isNative ? 'Ketik nilai...' : ''}">`;
+
+                return `
+                <div class="group flex flex-col">
+                    <label class="text-xs font-bold text-slate-400 mb-1 tracking-wider group-focus-within:text-emerald-400 transition-colors flex items-center">
+                        ${col} ${badgeHtml}
+                        ${!isNative ? '<i class="fa-solid fa-lock ml-auto text-slate-600 text-[10px]"></i>' : ''}
+                    </label>
+                    ${inputHtml}
+                </div>`;
+            };
+
+            if (rowData) {
+                currentEditPkVal = rowData[guessedPkCol];
+                Object.keys(rowData).forEach(col => {
+                    const isNative = (tableName === activeTable) ? nativeCols.includes(col) : true;
+                    html += buildInput(col, rowData[col], col === guessedPkCol, isNative);
+                });
+                
+                if(isEditorActive) {
+                    btnDelete.classList.remove('hidden'); btnDelete.classList.add('flex'); btnDelete.onclick = () => deleteEditorRecord(currentEditPkVal);
+                    footerAction.classList.remove('hidden');
+                } else {
+                    footerAction.classList.add('hidden');
+                }
+            } else {
+                currentEditPkVal = null;
+                nativeCols.forEach(col => { html += buildInput(col, '', col === guessedPkCol, true); });
+                btnDelete.classList.add('hidden'); btnDelete.classList.remove('flex');
+                if(isEditorActive) footerAction.classList.remove('hidden'); else footerAction.classList.add('hidden');
+            }
+            
+            container.innerHTML = html + '</form>';
+        }
+
+function openPropertiesModal(triggerColName = null, triggerCellValue = null, rowData = null, tableName = activeTable) {
+            const modal = document.getElementById('propertiesModal');
+            const content = document.getElementById('propertiesModalContent');
+            const targetCellSpan = document.getElementById('propTargetCell');
+
+            // [PERBAIKAN] Izinkan nilai null / kosong untuk tetap diproses
+            if (triggerColName && triggerCellValue !== undefined) {
+                let displayVal = (triggerCellValue === null || triggerCellValue === '') ? 'NULL' : triggerCellValue;
+                targetCellSpan.innerHTML = `(<span class="text-blue-400">${triggerColName}</span>=<span class="text-amber-400">${escapeHTML(displayVal)}</span>)`;
+                targetCellSpan.classList.remove('hidden');
+            } else {
+                targetCellSpan.classList.add('hidden');
+                targetCellSpan.innerHTML = '';
+            }
+
+            if (window.innerWidth < 768) switchPropertiesTab(rowData === null || isEditorActive ? 'editor' : 'inspector');
+            
+            updateEditorPane(tableName, rowData);
+
+            // [PERBAIKAN] Hapus pengecekan yang memblokir null
+            if (rowData !== null && triggerColName && triggerCellValue !== undefined) {
+                startTrace(tableName, triggerColName, triggerCellValue);
+            } else if (!rowData) {
+                showTableOverviewInInspector();
+            } else {
+                document.getElementById('tracerBody').innerHTML = `<div class="flex flex-col items-center justify-center h-full text-slate-500 opacity-50"><i class="fa-solid fa-network-wired text-6xl mb-4"></i><p class="text-sm">Klik sebuah sel untuk melacak relasi datanya.</p></div>`;
+                document.getElementById('tracerBreadcrumbs').innerHTML = ''; document.getElementById('btnBackTracer').style.display = 'none';
+            }
+            
+            modal.classList.remove('hidden'); modal.classList.add('flex');
+            setTimeout(() => content.classList.remove('scale-95'), 10);
+        }
+
+        function showTableOverviewInInspector() {
+            const globalRowsData = <?= json_encode(array_slice($rows, 0, 50), JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE) ?>;
+            document.getElementById('tracerBreadcrumbs').innerHTML = `<span class="text-theme font-bold"><i class="fa-solid fa-table"></i> Data Tabel Aktif (${activeTable})</span>`;
+            document.getElementById('btnBackTracer').style.display = 'none';
+            
+            if (!globalRowsData || globalRowsData.length === 0) {
+                document.getElementById('tracerBody').innerHTML = `<div class="flex flex-col items-center justify-center h-full text-slate-500 opacity-50"><i class="fa-solid fa-folder-open text-6xl mb-4"></i><p class="text-sm">Tabel ini masih kosong.</p></div>`;
+                return;
+            }
+
+            const keys = Object.keys(globalRowsData[0]);
+            let tableHtml = `
+            <div class="bg-[#1e293b] border border-slate-700 rounded-xl overflow-hidden shadow-md">
+                <div class="overflow-x-auto w-full properties-scroll">
+                    <table class="w-full text-left text-xs min-w-max">
+                        <thead class="bg-[#0f172a]/50 text-slate-400"><tr>${keys.map((k) => `<th class="px-3 py-2 font-semibold border-b border-slate-700">${k}</th>`).join('')}</tr></thead>
+                        <tbody class="divide-y divide-slate-700/50 font-mono">
+                            ${globalRowsData.map(r => `
+                                <tr class="hover:bg-slate-700/50 transition-colors">
+                                    ${Object.entries(r).map(([k, v]) => `<td class="px-3 py-2 text-slate-300 whitespace-nowrap">${v !== null ? escapeHTML(v) : '<span class="text-slate-600 italic">NULL</span>'}</td>`).join('')}
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>`;
+            document.getElementById('tracerBody').innerHTML = tableHtml;
+        }
+
+        function closePropertiesModal() {
+            const modal = document.getElementById('propertiesModal');
+            const content = document.getElementById('propertiesModalContent');
+            content.classList.add('scale-95');
+            setTimeout(() => { modal.classList.add('hidden'); modal.classList.remove('flex'); }, 150);
+        }
+
+        function switchPropertiesTab(tab) {
+            const paneEd = document.getElementById('paneEditor'), paneIn = document.getElementById('paneInspector');
+            const btnEd = document.getElementById('tabBtnEditor'), btnIn = document.getElementById('tabBtnInspector');
+            const actBtn = "flex-1 py-1.5 text-xs font-bold rounded-md bg-theme text-white shadow-sm", inactBtn = "flex-1 py-1.5 text-xs font-bold rounded-md text-slate-400 hover:text-white transition-colors";
+
+            if (tab === 'editor') {
+                paneEd.style.transform = 'translateX(0)'; paneIn.style.transform = 'translateX(100%)';
+                btnEd.className = actBtn; btnIn.className = inactBtn;
+            } else {
+                paneEd.style.transform = 'translateX(-100%)'; paneIn.style.transform = 'translateX(0)';
+                btnIn.className = actBtn; btnEd.className = inactBtn;
+            }
+        }
+
+        async function saveEditorRecord() {
+            const form = document.getElementById('editorForm');
+            const formData = new FormData(form);
+            const dataObj = {};
+            formData.forEach((value, key) => { if(value.trim() !== "") dataObj[key] = value; });
+
+            try {
+                const reqData = new FormData();
+                reqData.append('operation', 'save'); reqData.append('table', currentEditTable);
+                if (currentEditPkVal) reqData.append('pkVal', currentEditPkVal);
+                reqData.append('data', JSON.stringify(dataObj));
+
+                const res = await fetch('?action=crud', { method: 'POST', body: reqData });
+                const result = await res.json();
+                if (result.success) location.reload(); else alert('Gagal menyimpan: ' + result.message);
+            } catch (err) { alert('Error sistem: ' + err.message); }
+        }
+
+        async function deleteEditorRecord(pkVal) {
+            if(!confirm('🚨 PERINGATAN!\n\nApakah kamu yakin ingin menghapus data ini secara permanen? Data tidak dapat dikembalikan!')) return;
+            try {
+                const reqData = new FormData();
+                reqData.append('operation', 'delete'); reqData.append('table', currentEditTable); reqData.append('pkVal', pkVal);
+                const res = await fetch('?action=crud', { method: 'POST', body: reqData });
+                const result = await res.json();
+                if (result.success) location.reload(); else alert('Gagal menghapus: ' + result.message);
+            } catch (err) { alert('Error sistem: ' + err.message); }
+        }
+
+        // --- 2. DEEP INSPECTOR LOGIC ---
+        let traceHistory = []; let currentTraceData = null; let currentTracerMode = 'raw'; 
+
+        // Mode switch Inspector (Raw/Join) yang sempat hilang!
+        function changeTracerMode(mode) {
+            currentTracerMode = mode;
+            const actCls = 'px-3 py-1 rounded text-[10px] md:text-xs font-bold bg-theme text-white shadow-sm';
+            const inactCls = 'px-3 py-1 rounded text-[10px] md:text-xs font-bold text-slate-400 hover:text-white transition-colors';
+            
+            const rawBtn = document.getElementById('tracerModeRaw');
+            const joinBtn = document.getElementById('tracerModeJoin');
+            if (rawBtn) rawBtn.className = mode === 'raw' ? actCls : inactCls;
+            if (joinBtn) joinBtn.className = mode === 'join' ? actCls : inactCls;
+
+            if(traceHistory.length > 0) { 
+                const last = traceHistory[traceHistory.length - 1]; 
+                executeTrace(last.table, last.col, last.val, true); 
+            }
+        }
+
+        function inspectAndEdit(tableName, colName, value, rowJsonStr) {
+            const rowObj = JSON.parse(unEscapeHTML(rowJsonStr));
+            if(window.innerWidth < 768) switchPropertiesTab('inspector');
+            pushTrace(tableName, colName, value);
+            updateEditorPane(tableName, rowObj);
+        }
+
+function startTrace(tableName, colName, value) {
+            traceHistory = []; executeTrace(tableName, colName, value);
+        }
+
+        function pushTrace(tableName, colName, value) {
+            if(window.innerWidth < 768) switchPropertiesTab('inspector');
+            executeTrace(tableName, colName, value);
+        }
+
+        function goBackTracer() {
+            if (traceHistory.length > 1) {
+                traceHistory.pop(); const prev = traceHistory[traceHistory.length - 1]; executeTrace(prev.table, prev.col, prev.val, true);
+            }
+        }
+
+async function executeTrace(tableName, colName, value, skipPush = false) {
+            const tBody = document.getElementById('tracerBody');
+            
+            // Konversi nilai null asli dari JS agar aman dikirim ke Backend
+            let sendValue = value === null ? 'NULL' : value;
+
+            if(!skipPush) traceHistory.push({table: tableName, col: colName, val: sendValue});
+            document.getElementById('btnBackTracer').style.display = traceHistory.length > 1 ? 'block' : 'none';
+            
+            document.getElementById('tracerBreadcrumbs').innerHTML = traceHistory.map((step, i) => {
+                let dispVal = (step.val === null || step.val === '') ? 'NULL' : step.val;
+                return `<span class="${i === traceHistory.length - 1 ? 'text-theme font-bold' : 'text-slate-500'}">${step.table} <span class="hidden md:inline">(${step.col}=${escapeHTML(dispVal)})</span></span>`;
+            }).join(' <span class="text-slate-600 text-[10px]"><i class="fa-solid fa-chevron-right"></i></span> ');
+
+            tBody.innerHTML = `<div class="flex flex-col gap-4 justify-center items-center h-full"><i class="fa-solid fa-circle-notch fa-spin text-4xl text-theme"></i><p class="text-slate-400 text-xs md:text-sm">Menarik relasi data...</p></div>`;
+
+            try {
+                const response = await fetch(`?action=trace&table=${encodeURIComponent(tableName)}&col=${encodeURIComponent(colName)}&val=${encodeURIComponent(sendValue)}&trace_mode=${currentTracerMode}`);
+                const resData = await response.json();
+                if(resData.error) throw new Error(resData.message);
+                
+                currentTraceData = resData.data; 
+                updateFilterBadges(); 
+                renderTracerData('all'); 
+            } catch (err) {
+                tBody.innerHTML = `<div class="text-red-400 bg-red-900/20 border border-red-900 p-6 rounded-xl flex items-center gap-3"><i class="fa-solid fa-triangle-exclamation fa-2x"></i> Error: ${err.message}</div>`;
+            }
+        }
+
+        function updateFilterBadges() {
+            const d = currentTraceData;
+            document.getElementById('badge-source').innerText = d.source_row.length;
+            document.getElementById('badge-row').innerText = d.row_relations.length + d.value_relations.length;
+            document.getElementById('badge-global').innerText = d.global_matches.length;
+        }
+
+        document.querySelectorAll('.filter-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                document.querySelectorAll('.filter-btn').forEach(b => {
+                    b.classList.remove('bg-theme', 'text-white', 'shadow-sm'); b.classList.add('text-slate-400', 'hover:bg-slate-700');
+                });
+                const target = e.currentTarget;
+                target.classList.remove('text-slate-400', 'hover:bg-slate-700'); target.classList.add('bg-theme', 'text-white', 'shadow-sm');
+                renderTracerData(target.dataset.filter);
+            });
+        });
+
+        function renderTracerData(filter) {
+            if(!currentTraceData) return;
+            const d = currentTraceData; let html = '';
+            const tBody = document.getElementById('tracerBody');
+
+            const renderBlock = (groups, sectionTitle, iconHtml, colorCls) => {
+                if(groups.length === 0) return '';
+                let blockHtml = `<h4 class="text-white font-bold mb-3 mt-4 flex items-center gap-2 px-1 text-sm border-b border-slate-700 pb-2"><span class="text-${colorCls}">${iconHtml}</span> ${sectionTitle}</h4><div class="space-y-4 mb-6">`;
+                groups.forEach(group => {
+                    if(group.data.length === 0) return;
+                    let keys = Object.keys(group.data[0]);
+                    blockHtml += `
+                        <div class="bg-[#1e293b] border border-slate-700 rounded-xl overflow-hidden shadow-md">
+                            <div class="bg-slate-800 px-3 py-2 flex flex-wrap justify-between items-center border-b border-slate-700 gap-2">
+                                <div class="flex items-center min-w-0">
+                                    <span class="text-[9px] text-${colorCls} font-bold uppercase tracking-widest bg-slate-900 px-2 py-0.5 rounded border border-slate-700 shrink-0">${group.type}</span>
+                                    <span class="text-xs text-white font-bold tracking-wide flex items-center gap-2 truncate ml-2">
+                                        <i class="fa-solid fa-table text-slate-500 hidden sm:inline"></i> 
+                                        <span class="truncate">${group.table}</span>
+                                        <span class="bg-slate-700 text-slate-300 text-[10px] px-2 py-0.5 rounded-full ml-1 shrink-0">${group.data.length} baris</span>
+                                    </span>
+                                </div>
+                                <a href="?table=${encodeURIComponent(group.table)}" class="text-[10px] bg-theme/20 text-theme hover-bg-theme px-2.5 py-1 rounded transition-colors flex items-center gap-1.5 shrink-0 font-bold border border-theme/30 ml-auto">
+                                    <i class="fa-solid fa-arrow-up-right-from-square"></i> <span class="hidden sm:inline">Buka Tabel</span>
+                                </a>
+                            </div>
+                            <div class="overflow-x-auto w-full properties-scroll">
+                                <table class="w-full text-left text-xs min-w-max">
+                                    <thead class="bg-[#0f172a]/50 text-slate-400">
+                                        <tr>${keys.map((k, idx) => `
+                                            <th class="px-3 py-2 font-semibold border-b border-slate-700 whitespace-nowrap cursor-pointer hover-text-theme transition-colors group/th cell-pad" onclick="sortInspectorTable(this, ${idx})">
+                                                <div class="flex items-center justify-between gap-2">
+                                                    <span>${k}</span><i class="fa-solid fa-sort opacity-30 group-hover/th:opacity-100 transition-opacity sort-icon-insp text-slate-500"></i>
+                                                </div>
+                                            </th>`).join('')}
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-slate-700/50 font-mono">
+                                        ${group.data.map(row => {
+                                            const rowStr = escapeHTML(JSON.stringify(row));
+                                            return `
+                                            <tr class="hover:bg-slate-700/50 transition-colors">
+                                                ${Object.entries(row).map(([k, v]) => `
+                                                    <td class="px-3 py-2 text-slate-300 cursor-pointer hover-text-theme whitespace-nowrap properties-trigger" onclick="inspectAndEdit('${group.table}', '${k}', '${escapeHTML(v)}', '${rowStr}')">
+                                                        ${v !== null ? escapeHTML(v) : '<span class="text-slate-600 italic">NULL</span>'}
+                                                    </td>
+                                                `).join('')}
+                                            </tr>`;
+                                        }).join('')}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>`;
+                });
+                return blockHtml + `</div>`;
+            };
+
+            if (filter === 'all' || filter === 'source_row') html += renderBlock(d.source_row, "Data Baris Utama", '<i class="fa-solid fa-crosshairs"></i>', 'blue-400');
+            if (filter === 'all' || filter === 'row_relations') {
+                html += renderBlock(d.row_relations, "Relasi Terhubung (ID Entitas)", '<i class="fa-solid fa-link"></i>', 'emerald-400');
+                html += renderBlock(d.value_relations, "Relasi Berdasarkan Value Sel", '<i class="fa-solid fa-puzzle-piece"></i>', 'emerald-400');
+            }
+            if (filter === 'all' || filter === 'global_matches') html += renderBlock(d.global_matches, "Ditemukan Juga Di", '<i class="fa-solid fa-globe"></i>', 'purple-400');
+
+            if(html === '') html = `<div class="text-center p-8 bg-slate-800/50 rounded-xl border border-slate-700"><i class="fa-solid fa-box-open text-3xl text-slate-600 mb-3"></i><p class="text-slate-400 text-sm">Tidak ada relasi data.</p></div>`;
+            tBody.innerHTML = html;
+        }
+
+        // --- 3. SCRIPT GLOBAL BAWAAN ---
         function toggleMobileSearch(show) {
-            const normal = document.getElementById('mobileHeaderNormal');
-            const search = document.getElementById('mobileHeaderSearch');
-            const input = document.getElementById('globalSearchMobile');
-            
-            if (show) {
-                normal.classList.add('hidden'); normal.classList.remove('flex');
-                search.classList.remove('hidden'); search.classList.add('flex');
-                input.focus();
-            } else {
-                search.classList.add('hidden'); search.classList.remove('flex');
-                normal.classList.remove('hidden'); normal.classList.add('flex');
-                input.value = ''; executeSearch('');
-            }
+            const normal = document.getElementById('mobileHeaderNormal'), search = document.getElementById('mobileHeaderSearch'), input = document.getElementById('globalSearchMobile');
+            if (show) { normal.classList.add('hidden'); normal.classList.remove('flex'); search.classList.remove('hidden'); search.classList.add('flex'); input.focus();
+            } else { search.classList.add('hidden'); search.classList.remove('flex'); normal.classList.remove('hidden'); normal.classList.add('flex'); input.value = ''; executeSearch(''); }
         }
 
-        function updateA11yUI() {
-            const fs = localStorage.getItem('voidDbFontSize') || '16';
-            const dens = JSON.parse(localStorage.getItem('voidDbDensity')) || {py: '0.75rem', px: '1.25rem'};
-            
-            ['font14', 'font16', 'font18'].forEach(id => { 
-                if(document.getElementById(id)) document.getElementById(id).className = 'flex-1 py-1.5 rounded-md text-xs font-bold transition-colors text-slate-400 hover:text-white'; 
+        const executeSearch = function(val) {
+            let filter = val.toLowerCase(), count = 0;
+            document.querySelectorAll("#dataTable tbody tr.data-row").forEach(row => {
+                if(row.innerText.toLowerCase().includes(filter)) { row.style.display = ""; count++; } else row.style.display = "none";
             });
-            if(document.getElementById('font' + fs)) document.getElementById('font' + fs).className = 'flex-1 py-1.5 rounded-md text-xs font-bold transition-colors bg-theme text-white shadow-sm';
+            document.getElementById('rowCount').innerHTML = `<i class="fa-solid fa-chart-simple mr-1"></i> ${count} baris dimuat`;
+        };
+        if(document.getElementById('globalSearchDesk')) document.getElementById('globalSearchDesk').addEventListener('keyup', (e) => executeSearch(e.target.value));
+        if(document.getElementById('globalSearchMobile')) document.getElementById('globalSearchMobile').addEventListener('keyup', (e) => executeSearch(e.target.value));
 
-            ['denseTight', 'denseNormal', 'denseLoose'].forEach(id => { 
-                if(document.getElementById(id)) document.getElementById(id).className = 'flex-1 py-1.5 rounded-md text-xs font-bold transition-colors text-slate-400 hover:text-white'; 
-            });
-            
-            let densId = 'denseNormal';
-            if (dens.py === '0.35rem') densId = 'denseTight';
-            else if (dens.py === '1.25rem') densId = 'denseLoose';
-            if(document.getElementById(densId)) document.getElementById(densId).className = 'flex-1 py-1.5 rounded-md text-xs font-bold transition-colors bg-theme text-white shadow-sm';
+        function toggleMobileTools(forceState = null) {
+            const sheet = document.getElementById('mobileToolsSheet'), overlay = document.getElementById('mobileToolsOverlay');
+            let willOpen = forceState !== null ? forceState : sheet.classList.contains('translate-y-full');
+            if (willOpen) { sheet.classList.remove('translate-y-full'); overlay.classList.remove('hidden'); localStorage.setItem('voidDbFabState', 'open');
+            } else { sheet.classList.add('translate-y-full'); overlay.classList.add('hidden'); localStorage.setItem('voidDbFabState', 'closed'); }
         }
 
-        function setA11y(type, val) {
-            if (type === 'font') {
-                document.documentElement.style.setProperty('--app-font-scale', val + 'px');
-                localStorage.setItem('voidDbFontSize', val);
-            } else if (type === 'density') {
-                let py = '0.75rem', px = '1.25rem';
-                if (val === 'tight') { py = '0.35rem'; px = '0.75rem'; }
-                else if (val === 'loose') { py = '1.25rem'; px = '1.5rem'; }
-                document.documentElement.style.setProperty('--cell-py', py);
-                document.documentElement.style.setProperty('--cell-px', px);
-                localStorage.setItem('voidDbDensity', JSON.stringify({py, px}));
-            }
-            updateA11yUI();
-        }
-        
-        if(document.getElementById('font16')) updateA11yUI();
-
-        function toggleMobileTools() {
-            const sheet = document.getElementById('mobileToolsSheet');
-            const overlay = document.getElementById('mobileToolsOverlay');
-            if (sheet.classList.contains('translate-y-full')) {
-                sheet.classList.remove('translate-y-full'); overlay.classList.remove('hidden');
-            } else {
-                sheet.classList.add('translate-y-full'); overlay.classList.add('hidden');
-            }
-        }
-
+        // --- RESTORASI SIDEBAR, SETTINGS, HIDE, TEMA, A11Y ---
         const sidebar = document.getElementById('appSidebar');
         const overlaySidebar = document.getElementById('sidebarOverlay');
         let isDesktopCollapsed = false;
@@ -831,12 +1378,14 @@ if ($currentTable) {
             isDesktopCollapsed = !isDesktopCollapsed;
             if(isDesktopCollapsed) {
                 sidebar.classList.add('sidebar-collapsed');
-                document.querySelectorAll('.show-on-collapse').forEach(el => el.classList.remove('hidden', 'md:hidden'));
-                document.querySelectorAll('.show-on-collapse').forEach(el => el.classList.add('flex'));
+                document.querySelectorAll('.show-on-collapse').forEach(el => {
+                    el.classList.remove('hidden', 'md:hidden'); el.classList.add('flex');
+                });
             } else {
                 sidebar.classList.remove('sidebar-collapsed');
-                document.querySelectorAll('.show-on-collapse').forEach(el => el.classList.add('hidden'));
-                document.querySelectorAll('.show-on-collapse').forEach(el => el.classList.remove('flex'));
+                document.querySelectorAll('.show-on-collapse').forEach(el => {
+                    el.classList.add('hidden'); el.classList.remove('flex');
+                });
             }
         }
 
@@ -873,20 +1422,49 @@ if ($currentTable) {
             fetch('?action=save_theme', {method: 'POST', body: formData});
         }
 
-        const colContainer = document.getElementById('columnToggles');
-        const mobileColContainer = document.getElementById('mobileColumnToggles');
-        
+        function updateA11yUI() {
+            const fs = localStorage.getItem('voidDbFontSize') || '16';
+            const dens = JSON.parse(localStorage.getItem('voidDbDensity')) || {py: '0.75rem', px: '1.25rem'};
+            
+            ['font14', 'font16', 'font18'].forEach(id => { 
+                if(document.getElementById(id)) document.getElementById(id).className = 'flex-1 py-1.5 rounded-md text-xs font-bold transition-colors text-slate-400 hover:text-white'; 
+            });
+            if(document.getElementById('font' + fs)) document.getElementById('font' + fs).className = 'flex-1 py-1.5 rounded-md text-xs font-bold transition-colors bg-theme text-white shadow-sm';
+
+            ['denseTight', 'denseNormal', 'denseLoose'].forEach(id => { 
+                if(document.getElementById(id)) document.getElementById(id).className = 'flex-1 py-1.5 rounded-md text-xs font-bold transition-colors text-slate-400 hover:text-white'; 
+            });
+            
+            let densId = 'denseNormal';
+            if (dens.py === '0.35rem') densId = 'denseTight';
+            else if (dens.py === '1.25rem') densId = 'denseLoose';
+            if(document.getElementById(densId)) document.getElementById(densId).className = 'flex-1 py-1.5 rounded-md text-xs font-bold transition-colors bg-theme text-white shadow-sm';
+        }
+
+        function setA11y(type, val) {
+            if (type === 'font') {
+                document.documentElement.style.setProperty('--app-font-scale', val + 'px');
+                localStorage.setItem('voidDbFontSize', val);
+            } else if (type === 'density') {
+                let py = '0.75rem', px = '1.25rem';
+                if (val === 'tight') { py = '0.35rem'; px = '0.75rem'; }
+                else if (val === 'loose') { py = '1.25rem'; px = '1.5rem'; }
+                document.documentElement.style.setProperty('--cell-py', py);
+                document.documentElement.style.setProperty('--cell-px', px);
+                localStorage.setItem('voidDbDensity', JSON.stringify({py, px}));
+            }
+            updateA11yUI();
+        }
+        if(document.getElementById('font16')) updateA11yUI();
+
+        const colContainer = document.getElementById('columnToggles'), mobileColContainer = document.getElementById('mobileColumnToggles');
         if (colContainer && mobileColContainer) {
             document.querySelectorAll('#tableHeaderRow th').forEach((th, index) => {
                 let colNameText = th.querySelector('.flex-1')?.innerText.trim() || `Kolom ${index}`;
-                
-                const labelDesk = document.createElement('label');
-                labelDesk.className = "flex items-center gap-3 px-3 py-2 hover:bg-slate-700 rounded-md cursor-pointer text-sm text-slate-300 transition-colors border border-transparent hover:border-slate-600";
+                const labelDesk = document.createElement('label'); labelDesk.className = "flex items-center gap-3 px-3 py-2 hover:bg-slate-700 rounded-md cursor-pointer text-sm text-slate-300 transition-colors border border-transparent hover:border-slate-600";
                 labelDesk.innerHTML = `<input type="checkbox" checked class="col-toggle-${index} rounded bg-slate-900 border-slate-600 text-theme focus:ring-theme w-4 h-4 cursor-pointer" onchange="toggleColumn(${index}, this.checked)"> <span class="truncate flex-1">${colNameText}</span>`;
                 colContainer.appendChild(labelDesk);
-
-                const labelMob = document.createElement('label');
-                labelMob.className = "flex items-center gap-2 p-2 bg-slate-800 rounded-lg cursor-pointer text-xs text-slate-300 border border-slate-700 active:border-theme";
+                const labelMob = document.createElement('label'); labelMob.className = "flex items-center gap-2 p-2 bg-slate-800 rounded-lg cursor-pointer text-xs text-slate-300 border border-slate-700 active:border-theme";
                 labelMob.innerHTML = `<input type="checkbox" checked class="col-toggle-${index} rounded bg-slate-900 border-slate-600 text-theme focus:ring-theme w-4 h-4 cursor-pointer" onchange="toggleColumn(${index}, this.checked)"> <span class="truncate flex-1">${colNameText}</span>`;
                 mobileColContainer.appendChild(labelMob);
             });
@@ -901,44 +1479,29 @@ if ($currentTable) {
 
         let currentPinnedIndex = -1;
         function pinColumn(index) {
-            const nth = index + 1;
-            const styleTag = document.getElementById('dynamicPinStyle');
-            if (currentPinnedIndex === index) {
-                styleTag.innerHTML = ''; currentPinnedIndex = -1;
+            const nth = index + 1; const styleTag = document.getElementById('dynamicPinStyle');
+            if (currentPinnedIndex === index) { styleTag.innerHTML = ''; currentPinnedIndex = -1;
             } else {
-                styleTag.innerHTML = `
-                    #dataTable th:nth-child(${nth}), #dataTable td:nth-child(${nth}) {
-                        position: sticky !important; left: 0 !important; right: 0 !important; z-index: 30 !important;
-                        background-color: var(--bg-panel) !important; box-shadow: -4px 0 15px rgba(0,0,0,0.5), 4px 0 15px rgba(0,0,0,0.5) !important;
-                        border-left: 2px solid var(--theme-color) !important; border-right: 2px solid var(--theme-color) !important;
-                    }
-                    #dataTable td:nth-child(${nth}) { background-color: #1e293b !important; }
-                    #dataTable th:nth-child(${nth}) { z-index: 40 !important; background-color: #1e293b !important; }
-                `;
+                styleTag.innerHTML = `#dataTable th:nth-child(${nth}), #dataTable td:nth-child(${nth}) { position: sticky !important; left: 0 !important; right: 0 !important; z-index: 30 !important; background-color: var(--bg-panel) !important; box-shadow: -4px 0 15px rgba(0,0,0,0.5), 4px 0 15px rgba(0,0,0,0.5) !important; border-left: 2px solid var(--theme-color) !important; border-right: 2px solid var(--theme-color) !important; } #dataTable td:nth-child(${nth}) { background-color: #1e293b !important; } #dataTable th:nth-child(${nth}) { z-index: 40 !important; background-color: #1e293b !important; }`;
                 currentPinnedIndex = index;
             }
         }
 
         function sortTable(n, headerElem) {
-            const tbody = document.querySelector("#dataTable tbody");
-            const rows = Array.from(tbody.querySelectorAll("tr.data-row"));
+            const tbody = document.querySelector("#dataTable tbody"); const rows = Array.from(tbody.querySelectorAll("tr.data-row"));
             const table = headerElem.closest('table');
-            
             table.querySelectorAll('th').forEach(th => {
                 if (th !== headerElem) {
-                    th.dataset.dir = '';
-                    const icon = th.querySelector('i.fa-sort-up, i.fa-sort-down, i.fa-sort');
+                    th.dataset.dir = ''; const icon = th.querySelector('i.fa-sort-up, i.fa-sort-down, i.fa-sort');
                     if(icon) icon.className = 'fa-solid fa-sort opacity-30 group-hover/th:opacity-100 transition-opacity text-slate-400 sort-icon-main';
                 }
             });
-
             let isAsc = headerElem.dataset.dir !== 'asc'; headerElem.dataset.dir = isAsc ? 'asc' : 'desc';
             const icon = headerElem.querySelector('i.sort-icon-main');
             if(icon) {
                 icon.className = isAsc ? 'fa-solid fa-sort-up text-theme opacity-100 sort-icon-main spin-anim' : 'fa-solid fa-sort-down text-theme opacity-100 sort-icon-main spin-anim';
                 icon.classList.remove('spin-anim'); void icon.offsetWidth; icon.classList.add('spin-anim');
             }
-
             rows.sort((a, b) => {
                 let x = a.children[n].innerText.trim(), y = b.children[n].innerText.trim();
                 if(x === 'NULL') return isAsc ? -1 : 1; if(y === 'NULL') return isAsc ? 1 : -1;
@@ -952,22 +1515,18 @@ if ($currentTable) {
         function sortInspectorTable(headerElem, n) {
             const table = headerElem.closest('table'); const tbody = table.querySelector('tbody');
             const rows = Array.from(tbody.querySelectorAll('tr'));
-            
             table.querySelectorAll('th').forEach(th => {
                 if (th !== headerElem) {
-                    th.dataset.dir = '';
-                    const icon = th.querySelector('i.fa-sort-up, i.fa-sort-down, i.fa-sort');
+                    th.dataset.dir = ''; const icon = th.querySelector('i.fa-sort-up, i.fa-sort-down, i.fa-sort');
                     if(icon) icon.className = 'fa-solid fa-sort opacity-30 group-hover/th:opacity-100 transition-opacity sort-icon-insp text-slate-500';
                 }
             });
-
             let isAsc = headerElem.dataset.dir !== 'asc'; headerElem.dataset.dir = isAsc ? 'asc' : 'desc';
             const icon = headerElem.querySelector('i');
             if(icon) {
                 icon.className = isAsc ? 'fa-solid fa-sort-up text-theme opacity-100 spin-anim' : 'fa-solid fa-sort-down text-theme opacity-100 spin-anim';
                 icon.classList.remove('spin-anim'); void icon.offsetWidth; icon.classList.add('spin-anim');
             }
-
             rows.sort((a, b) => {
                 let x = a.children[n].innerText.trim(), y = b.children[n].innerText.trim();
                 if(x === 'NULL') return isAsc ? -1 : 1; if(y === 'NULL') return isAsc ? 1 : -1;
@@ -976,155 +1535,6 @@ if ($currentTable) {
                 return isAsc ? x.localeCompare(y) : y.localeCompare(x);
             });
             rows.forEach(row => tbody.appendChild(row));
-        }
-
-        const executeSearch = function(val) {
-            let filter = val.toLowerCase(), count = 0;
-            document.querySelectorAll("#dataTable tbody tr.data-row").forEach(row => {
-                if(row.innerText.toLowerCase().includes(filter)) { row.style.display = ""; count++; }
-                else row.style.display = "none";
-            });
-            document.getElementById('rowCount').innerHTML = `<i class="fa-solid fa-chart-simple mr-1"></i> ${count} baris dimuat`;
-        };
-        const searchDesk = document.getElementById('globalSearchDesk'); const searchMob = document.getElementById('globalSearchMobile');
-        if(searchDesk) searchDesk.addEventListener('keyup', (e) => executeSearch(e.target.value));
-        if(searchMob) searchMob.addEventListener('keyup', (e) => executeSearch(e.target.value));
-
-        const modal = document.getElementById('tracerModal'); const tracerBody = document.getElementById('tracerBody');
-        let traceHistory = []; let currentTraceData = null; let currentTracerMode = 'raw'; 
-
-        function changeTracerMode(mode) {
-            currentTracerMode = mode;
-            const actCls = 'px-3 py-1 rounded text-xs font-bold bg-theme text-white shadow-sm';
-            const inactCls = 'px-3 py-1 rounded text-xs font-bold text-slate-400 hover:text-white transition-colors';
-            document.getElementById('tracerModeRaw').className = mode === 'raw' ? actCls : inactCls;
-            document.getElementById('tracerModeJoin').className = mode === 'join' ? actCls : inactCls;
-            if(traceHistory.length > 0) { const last = traceHistory[traceHistory.length - 1]; executeTrace(last.table, last.col, last.val, true); }
-        }
-
-        function startTrace(tableName, colName, value) {
-            if (value === 'NULL' || value === '') return;
-            traceHistory = []; executeTrace(tableName, colName, value);
-        }
-
-        function pushTrace(tableName, colName, value) {
-            if (value === 'NULL' || value === '') return;
-            executeTrace(tableName, colName, value);
-        }
-
-        function goBackTracer() {
-            if (traceHistory.length > 1) {
-                traceHistory.pop(); const prev = traceHistory[traceHistory.length - 1]; executeTrace(prev.table, prev.col, prev.val, true);
-            }
-        }
-
-        async function executeTrace(tableName, colName, value, skipPush = false) {
-            modal.classList.remove('hidden'); modal.classList.add('flex');
-            setTimeout(() => document.getElementById('tracerContent').classList.remove('scale-95'), 10);
-            
-            if(!skipPush) traceHistory.push({table: tableName, col: colName, val: value});
-            document.getElementById('btnBackTracer').style.display = traceHistory.length > 1 ? 'block' : 'none';
-            
-            document.getElementById('tracerBreadcrumbs').innerHTML = traceHistory.map((step, i) => {
-                return `<span class="${i === traceHistory.length - 1 ? 'text-theme font-bold' : 'text-slate-500'}">${step.table} <span class="hidden md:inline">(${step.col}=${step.val})</span></span>`;
-            }).join(' <span class="text-slate-600 text-[10px]"><i class="fa-solid fa-chevron-right"></i></span> ');
-
-            tracerBody.innerHTML = `<div class="flex flex-col gap-4 justify-center items-center p-12 md:p-20"><i class="fa-solid fa-circle-notch fa-spin text-4xl text-theme"></i><p class="text-slate-400 text-xs md:text-sm">Menarik relasi data dari database...</p></div>`;
-
-            try {
-                const response = await fetch(`?action=trace&table=${encodeURIComponent(tableName)}&col=${encodeURIComponent(colName)}&val=${encodeURIComponent(value)}&trace_mode=${currentTracerMode}`);
-                const resData = await response.json();
-                if(resData.error) throw new Error(resData.message);
-                
-                currentTraceData = resData.data; updateFilterBadges(); renderTracerData('all'); 
-            } catch (err) {
-                tracerBody.innerHTML = `<div class="text-red-400 bg-red-900/20 border border-red-900 p-6 rounded-xl flex items-center gap-3"><i class="fa-solid fa-triangle-exclamation fa-2x"></i> Error: ${err.message}</div>`;
-            }
-        }
-
-        function updateFilterBadges() {
-            const d = currentTraceData;
-            document.getElementById('badge-source').innerText = d.source_row.length;
-            document.getElementById('badge-row').innerText = d.row_relations.length + d.value_relations.length;
-            document.getElementById('badge-global').innerText = d.global_matches.length;
-        }
-
-        document.querySelectorAll('.filter-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                document.querySelectorAll('.filter-btn').forEach(b => {
-                    b.classList.remove('bg-theme', 'text-white', 'shadow-sm'); b.classList.add('text-slate-400', 'hover:bg-slate-700');
-                });
-                const target = e.currentTarget;
-                target.classList.remove('text-slate-400', 'hover:bg-slate-700'); target.classList.add('bg-theme', 'text-white', 'shadow-sm');
-                renderTracerData(target.dataset.filter);
-            });
-        });
-
-        function renderTracerData(filter) {
-            if(!currentTraceData) return;
-            const d = currentTraceData; let html = '';
-
-            const renderBlock = (groups, sectionTitle, iconHtml, colorCls) => {
-                if(groups.length === 0) return '';
-                let blockHtml = `<h4 class="text-white font-bold mb-4 mt-6 flex items-center gap-2 px-2 text-sm md:text-base border-b border-slate-700 pb-2"><span class="text-${colorCls}">${iconHtml}</span> ${sectionTitle}</h4><div class="space-y-5 mb-8">`;
-                groups.forEach(group => {
-                    if(group.data.length === 0) return;
-                    let keys = Object.keys(group.data[0]);
-                    blockHtml += `
-                        <div class="bg-[#1e293b] border border-slate-700 rounded-xl overflow-hidden shadow-md">
-                            <div class="bg-slate-800 px-4 py-3 flex flex-wrap justify-between items-center border-b border-slate-700 gap-2">
-                                <div class="flex items-center min-w-0">
-                                    <span class="text-[10px] text-${colorCls} font-bold uppercase tracking-widest bg-slate-900 px-2.5 py-1 rounded border border-slate-700 shrink-0">${group.type}</span>
-                                    <span class="text-sm text-white font-bold tracking-wide flex items-center gap-2 truncate ml-3"><i class="fa-solid fa-table text-slate-500 hidden md:inline"></i> <span class="truncate">${group.table}</span> <span class="bg-slate-700 text-slate-300 text-[10px] px-2 py-0.5 rounded-full ml-1 shrink-0">${group.data.length} baris</span></span>
-                                </div>
-                                <a href="?table=${encodeURIComponent(group.table)}" class="text-xs bg-theme/20 text-theme hover-bg-theme px-3 py-1.5 rounded transition-colors flex items-center gap-2 shrink-0 font-bold border border-theme/30 ml-auto">
-                                    <i class="fa-solid fa-arrow-up-right-from-square"></i> <span class="hidden md:inline">Buka Tabel</span>
-                                </a>
-                            </div>
-                            <div class="overflow-x-auto w-full">
-                                <table class="w-full text-left text-sm min-w-max">
-                                    <thead class="bg-[#0f172a]/50 text-slate-400 text-xs">
-                                        <tr>${keys.map((k, idx) => `
-                                            <th class="px-4 py-3 font-semibold border-b border-slate-700 whitespace-nowrap cursor-pointer hover-text-theme transition-colors group/th cell-pad" onclick="sortInspectorTable(this, ${idx})">
-                                                <div class="flex items-center justify-between gap-2">
-                                                    <span>${k}</span>
-                                                    <i class="fa-solid fa-sort opacity-30 group-hover/th:opacity-100 transition-opacity sort-icon-insp text-slate-500"></i>
-                                                </div>
-                                            </th>`).join('')}
-                                        </tr>
-                                    </thead>
-                                    <tbody class="divide-y divide-slate-700/50 font-mono text-xs">
-                                        ${group.data.map(row => `
-                                            <tr class="hover:bg-slate-700/50 transition-colors group/row">
-                                                ${Object.entries(row).map(([k, v]) => `
-                                                    <td class="cell-pad text-slate-300 cursor-pointer hover-text-theme whitespace-nowrap" onclick="pushTrace('${group.table}', '${k}', '${v}')">
-                                                        ${v !== null ? v : '<span class="text-slate-600 italic">NULL</span>'}
-                                                    </td>
-                                                `).join('')}
-                                            </tr>
-                                        `).join('')}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>`;
-                });
-                return blockHtml + `</div>`;
-            };
-
-            if (filter === 'all' || filter === 'source_row') html += renderBlock(d.source_row, "Data Baris Utama", '<i class="fa-solid fa-crosshairs"></i>', 'blue-400');
-            if (filter === 'all' || filter === 'row_relations') {
-                html += renderBlock(d.row_relations, "Relasi Terhubung (ID Entitas)", '<i class="fa-solid fa-link"></i>', 'emerald-400');
-                html += renderBlock(d.value_relations, "Relasi Berdasarkan Value Sel", '<i class="fa-solid fa-puzzle-piece"></i>', 'emerald-400');
-            }
-            if (filter === 'all' || filter === 'global_matches') html += renderBlock(d.global_matches, "Ditemukan Juga Di", '<i class="fa-solid fa-globe"></i>', 'purple-400');
-
-            if(html === '') html = `<div class="text-center p-8 md:p-12 bg-slate-800/50 rounded-xl border border-slate-700"><i class="fa-solid fa-box-open text-4xl text-slate-600 mb-4"></i><p class="text-slate-400">Tidak ada data untuk kategori ini.</p></div>`;
-            tracerBody.innerHTML = html;
-        }
-
-        function closeTracer() {
-            document.getElementById('tracerContent').classList.add('scale-95');
-            setTimeout(() => { modal.classList.add('hidden'); modal.classList.remove('flex'); }, 150);
         }
     </script>
 </body>
