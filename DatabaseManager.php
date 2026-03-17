@@ -1,28 +1,35 @@
 <?php
 // DatabaseManager.php
 
-class DatabaseManager {
+class DatabaseManager
+{
     private $pdo;
     private $dbName;
     private $driver;
 
-    public function __construct($pdo, $dbName, $driver = 'mysql') {
+    public function __construct($pdo, $dbName, $driver = 'mysql')
+    {
         $this->pdo = $pdo;
         $this->dbName = $dbName;
         $this->driver = $driver;
     }
 
-    public function getTables() {
+    public function getTables()
+    {
         if ($this->driver === 'sqlite') {
             return $this->pdo->query("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")->fetchAll(PDO::FETCH_COLUMN);
         }
         return $this->pdo->query("SHOW TABLES")->fetchAll(PDO::FETCH_COLUMN);
     }
 
-    public function getPrimaryKey($table) {
+    public function getPrimaryKey($table)
+    {
         if ($this->driver === 'sqlite') {
             $cols = $this->pdo->query('PRAGMA table_info("' . $table . '")')->fetchAll(PDO::FETCH_ASSOC);
-            foreach($cols as $c) { if($c['pk'] > 0) return $c['name']; }
+            foreach ($cols as $c) {
+                if ($c['pk'] > 0)
+                    return $c['name'];
+            }
             return null;
         }
         $pkQuery = $this->pdo->prepare("SHOW KEYS FROM `$table` WHERE Key_name = 'PRIMARY'");
@@ -31,7 +38,8 @@ class DatabaseManager {
         return $pkResult ? $pkResult['Column_name'] : null;
     }
 
-    public function getRelations() {
+    public function getRelations()
+    {
         $relations = [];
 
         // 1. Ambil Relasi Resmi
@@ -52,7 +60,9 @@ class DatabaseManager {
                             ];
                         }
                     }
-                } catch (Exception $e) { continue; }
+                } catch (Exception $e) {
+                    continue;
+                }
             }
         } else {
             $sql = "SELECT TABLE_NAME, COLUMN_NAME, REFERENCED_TABLE_NAME, REFERENCED_COLUMN_NAME
@@ -70,7 +80,8 @@ class DatabaseManager {
             $pkSource = $this->getPrimaryKey($sourceTable) ?: '';
 
             foreach ($cols as $col) {
-                if (strcasecmp($col, $pkSource) === 0 || strtolower($col) === 'id') continue;
+                if (strcasecmp($col, $pkSource) === 0 || strtolower($col) === 'id')
+                    continue;
 
                 $prefix = "";
                 $colLower = strtolower($col);
@@ -87,8 +98,9 @@ class DatabaseManager {
                     $prefixWords = explode('_', $prefix);
 
                     foreach ($allTables as $targetTable) {
-                        if (strcasecmp($targetTable, $sourceTable) === 0) continue; 
-                        
+                        if (strcasecmp($targetTable, $sourceTable) === 0)
+                            continue;
+
                         $targetLower = strtolower($targetTable);
                         $isMatch = false;
 
@@ -100,7 +112,8 @@ class DatabaseManager {
                             foreach ($prefixWords as $pWord) {
                                 if (strlen($pWord) > 2) { // Minimal 3 huruf agar tidak salah menebak
                                     if ($pWord === $targetLower || $pWord . "s" === $targetLower || $pWord === $targetLower . "s") {
-                                        $isMatch = true; break;
+                                        $isMatch = true;
+                                        break;
                                     }
                                 }
                             }
@@ -110,28 +123,55 @@ class DatabaseManager {
                             $exists = false;
                             foreach ($relations as $rel) {
                                 if (strcasecmp($rel['TABLE_NAME'], $sourceTable) === 0 && strcasecmp($rel['COLUMN_NAME'], $col) === 0) {
-                                    $exists = true; break;
+                                    $exists = true;
+                                    break;
                                 }
                             }
 
                             if (!$exists) {
                                 $targetPk = $this->getPrimaryKey($targetTable);
-                                
+
                                 // Penebak PK Lapis 4 (Super Cerdas)
                                 if (!$targetPk) {
                                     $targetCols = $this->getTableColumns($targetTable);
-                                    
+
                                     // Lapis 1: Sama persis
-                                    foreach ($targetCols as $tc) { if (strcasecmp($tc, $col) === 0) { $targetPk = $tc; break; } }
-                                    
+                                    foreach ($targetCols as $tc) {
+                                        if (strcasecmp($tc, $col) === 0) {
+                                            $targetPk = $tc;
+                                            break;
+                                        }
+                                    }
+
                                     // Lapis 2: Tabel target + _id (item -> item_id)
-                                    if (!$targetPk) { foreach ($targetCols as $tc) { if (strcasecmp($tc, $targetTable . '_id') === 0) { $targetPk = $tc; break; } } }
-                                    
+                                    if (!$targetPk) {
+                                        foreach ($targetCols as $tc) {
+                                            if (strcasecmp($tc, $targetTable . '_id') === 0) {
+                                                $targetPk = $tc;
+                                                break;
+                                            }
+                                        }
+                                    }
+
                                     // Lapis 3: Cuma 'id'
-                                    if (!$targetPk) { foreach ($targetCols as $tc) { if (strcasecmp($tc, 'id') === 0) { $targetPk = $tc; break; } } }
-                                    
+                                    if (!$targetPk) {
+                                        foreach ($targetCols as $tc) {
+                                            if (strcasecmp($tc, 'id') === 0) {
+                                                $targetPk = $tc;
+                                                break;
+                                            }
+                                        }
+                                    }
+
                                     // Lapis 4: Pokoknya yang berakhiran _id
-                                    if (!$targetPk) { foreach ($targetCols as $tc) { if (preg_match('/_id$/i', $tc)) { $targetPk = $tc; break; } } }
+                                    if (!$targetPk) {
+                                        foreach ($targetCols as $tc) {
+                                            if (preg_match('/_id$/i', $tc)) {
+                                                $targetPk = $tc;
+                                                break;
+                                            }
+                                        }
+                                    }
                                 }
 
                                 $relations[] = [
@@ -150,27 +190,33 @@ class DatabaseManager {
         return $relations;
     }
 
-    public function getTableColumns($table) {
+    public function getTableColumns($table)
+    {
         if ($this->driver === 'sqlite') {
             $cols = $this->pdo->query('PRAGMA table_info("' . $table . '")')->fetchAll(PDO::FETCH_ASSOC);
-            return array_map(function($c) { return $c['name']; }, $cols);
+            return array_map(function ($c) {
+                return $c['name']; }, $cols);
         }
         return $this->pdo->query("SHOW COLUMNS FROM `$table`")->fetchAll(PDO::FETCH_COLUMN);
     }
 
-    private function getTableColumnsWithType($table) {
+    private function getTableColumnsWithType($table)
+    {
         if ($this->driver === 'sqlite') {
             $cols = $this->pdo->query('PRAGMA table_info("' . $table . '")')->fetchAll(PDO::FETCH_ASSOC);
-            return array_map(function($c) { return ['Field' => $c['name'], 'Type' => $c['type']]; }, $cols);
+            return array_map(function ($c) {
+                return ['Field' => $c['name'], 'Type' => $c['type']]; }, $cols);
         }
         return $this->pdo->query("SHOW COLUMNS FROM `$table`")->fetchAll(PDO::FETCH_ASSOC);
     }
 
-    public function buildRawQuery($table) {
+    public function buildRawQuery($table)
+    {
         return "SELECT * FROM `$table` LIMIT 500";
     }
 
-    public function buildJoinQuery($table, $relations) {
+    public function buildJoinQuery($table, $relations)
+    {
         $select = "SELECT `$table`.*";
         $joins = "";
         $aliasCount = [];
@@ -183,20 +229,21 @@ class DatabaseManager {
                 $localCol = trim($r['COLUMN_NAME']);
 
                 $cols = $this->getTableColumns($refTable);
-                
+
                 $actualRefCol = null;
                 foreach ($cols as $c) {
                     if (strcasecmp(trim($c), $refCol) === 0) {
-                        $actualRefCol = $c; 
+                        $actualRefCol = $c;
                         break;
                     }
                 }
 
-                if (!$actualRefCol) continue; 
+                if (!$actualRefCol)
+                    continue;
 
-                $refCol = $actualRefCol; 
+                $refCol = $actualRefCol;
                 $found = true;
-                
+
                 $aliasCount[$refTable] = isset($aliasCount[$refTable]) ? $aliasCount[$refTable] + 1 : 1;
                 $alias = $refTable . "_" . $aliasCount[$refTable];
 
@@ -208,12 +255,14 @@ class DatabaseManager {
                 $joins .= " LEFT JOIN `$refTable` AS `$alias` ON `$table`.`$localCol` = `$alias`.`$refCol`";
             }
         }
-        
+
         return $found ? "$select FROM `$table` $joins LIMIT 500" : null;
     }
 
-    public function fetchData($query) {
-        if (!$query || trim($query) === "") return [];
+    public function fetchData($query)
+    {
+        if (!$query || trim($query) === "")
+            return [];
         try {
             return $this->pdo->query($query)->fetchAll(PDO::FETCH_ASSOC);
         } catch (Exception $e) {
@@ -221,7 +270,8 @@ class DatabaseManager {
         }
     }
 
-    private function fetchTracedData($targetTable, $whereCol, $whereVal, $mode, $relations) {
+    private function fetchTracedData($targetTable, $whereCol, $whereVal, $mode, $relations)
+    {
         if ($mode === 'join') {
             $joinQuery = $this->buildJoinQuery($targetTable, $relations);
             if ($joinQuery !== null) {
@@ -232,16 +282,18 @@ class DatabaseManager {
         } else {
             $sql = "SELECT * FROM `$targetTable` WHERE `$whereCol` = :val LIMIT 250";
         }
-        
+
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute(['val' => $whereVal]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
-    private function fetchTracedDataMultiple($targetTable, $whereCol, $whereVals, $mode, $relations) {
-        if (empty($whereVals)) return [];
+    private function fetchTracedDataMultiple($targetTable, $whereCol, $whereVals, $mode, $relations)
+    {
+        if (empty($whereVals))
+            return [];
         $inQuery = implode(',', array_fill(0, count($whereVals), '?'));
-        
+
         if ($mode === 'join') {
             $joinQuery = $this->buildJoinQuery($targetTable, $relations);
             if ($joinQuery !== null) {
@@ -257,7 +309,8 @@ class DatabaseManager {
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
-    public function traceValueAdvanced($table, $column, $value, $mode = 'raw') {
+    public function traceValueAdvanced($table, $column, $value, $mode = 'raw')
+    {
         $results = ['source_row' => [], 'row_relations' => [], 'value_relations' => [], 'global_matches' => []];
         $relations = $this->getRelations();
         $actualCols = $this->getTableColumns($table);
@@ -266,17 +319,18 @@ class DatabaseManager {
             $stmtSource = $this->pdo->prepare("SELECT * FROM `$table` WHERE `$column` = :val LIMIT 250");
             $stmtSource->execute(['val' => $value]);
             $sourceRows = $stmtSource->fetchAll(PDO::FETCH_ASSOC);
-            
+
             if (!empty($sourceRows)) {
                 $sourceData = $this->fetchTracedData($table, $column, $value, $mode, $relations);
                 $results['source_row'][] = ['type' => 'Data Utama Terpilih', 'table' => $table, 'data' => $sourceData];
 
                 $pkCol = $this->getPrimaryKey($table) ?: '';
-                
+
                 $pkValues = [];
                 if ($pkCol !== '') {
                     foreach ($sourceRows as $r) {
-                        if (isset($r[$pkCol]) && $r[$pkCol] !== null) $pkValues[] = $r[$pkCol];
+                        if (isset($r[$pkCol]) && $r[$pkCol] !== null)
+                            $pkValues[] = $r[$pkCol];
                     }
                     $pkValues = array_unique($pkValues);
                 }
@@ -284,7 +338,7 @@ class DatabaseManager {
                 if (!empty($pkValues)) {
                     foreach ($relations as $rel) {
                         if (strcasecmp($rel['REFERENCED_TABLE_NAME'], $table) === 0 && strcasecmp($rel['REFERENCED_COLUMN_NAME'], $pkCol) === 0) {
-                            $cTable = $rel['TABLE_NAME']; 
+                            $cTable = $rel['TABLE_NAME'];
                             $cCol = $rel['COLUMN_NAME'];
                             if ($data = $this->fetchTracedDataMultiple($cTable, $cCol, $pkValues, $mode, $relations)) {
                                 $results['row_relations'][] = ['type' => "Dipakai di (Child)", 'table' => $cTable, 'data' => $data];
@@ -295,16 +349,17 @@ class DatabaseManager {
 
                 foreach ($relations as $rel) {
                     if (strcasecmp($rel['TABLE_NAME'], $table) === 0) {
-                        $pTable = $rel['REFERENCED_TABLE_NAME']; 
-                        $pCol = $rel['REFERENCED_COLUMN_NAME']; 
+                        $pTable = $rel['REFERENCED_TABLE_NAME'];
+                        $pCol = $rel['REFERENCED_COLUMN_NAME'];
                         $fkCol = $rel['COLUMN_NAME'];
-                        
+
                         $fkValues = [];
                         foreach ($sourceRows as $r) {
-                            if (isset($r[$fkCol]) && $r[$fkCol] !== null) $fkValues[] = $r[$fkCol];
+                            if (isset($r[$fkCol]) && $r[$fkCol] !== null)
+                                $fkValues[] = $r[$fkCol];
                         }
                         $fkValues = array_unique($fkValues);
-                        
+
                         if (!empty($fkValues)) {
                             if ($data = $this->fetchTracedDataMultiple($pTable, $pCol, $fkValues, $mode, $relations)) {
                                 $results['row_relations'][] = ['type' => "Bersumber dari (Parent)", 'table' => $pTable, 'data' => $data];
@@ -328,13 +383,18 @@ class DatabaseManager {
         foreach ($allTables as $t) {
             try {
                 $cols = $this->getTableColumnsWithType($t);
-                $searchConditions = []; $params = []; $colIndex = 0;
+                $searchConditions = [];
+                $params = [];
+                $colIndex = 0;
                 foreach ($cols as $cData) {
-                    $c = $cData['Field']; $type = strtolower($cData['Type']);
+                    $c = $cData['Field'];
+                    $type = strtolower($cData['Type']);
                     $isNumCol = preg_match('/int|float|double|decimal|numeric|real|bit|boolean/i', $type);
-                    if (!$isValueNumeric && $isNumCol) continue; 
+                    if (!$isValueNumeric && $isNumCol)
+                        continue;
                     $searchConditions[] = "`$c` = :val_$colIndex";
-                    $params["val_$colIndex"] = $value; $colIndex++;
+                    $params["val_$colIndex"] = $value;
+                    $colIndex++;
                 }
                 if (!empty($searchConditions)) {
                     $where = implode(" OR ", $searchConditions);
@@ -344,55 +404,69 @@ class DatabaseManager {
                         $results['global_matches'][] = ['type' => 'Ditemukan Di', 'table' => $t, 'data' => $foundGlobal];
                     }
                 }
-            } catch (Exception $e) { continue; }
+            } catch (Exception $e) {
+                continue;
+            }
         }
         return $results;
     }
 
-    public function exportToSQLite($table) {
+    public function exportToSQLite($table)
+    {
         $data = $this->fetchData($this->buildRawQuery($table));
-        if (empty($data)) return false;
-        
+        if (empty($data))
+            return false;
+
         $tempDir = __DIR__ . '/temp_db';
-        if (!is_dir($tempDir)) @mkdir($tempDir, 0777, true);
-        
+        if (!is_dir($tempDir))
+            @mkdir($tempDir, 0777, true);
+
         $dbFile = $tempDir . "/{$table}_" . time() . ".sqlite";
         $sqlite = new PDO("sqlite:" . $dbFile);
         $sqlite->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        
+
         $cols = array_keys($data[0]);
-        $colDefs = implode(" TEXT, ", array_map(function($c) { return "`$c` TEXT"; }, $cols));
+        $colDefs = implode(" TEXT, ", array_map(function ($c) {
+            return "`$c` TEXT"; }, $cols));
         $sqlite->exec("CREATE TABLE `$table` ($colDefs)");
-        
+
         $placeholders = implode(", ", array_fill(0, count($cols), "?"));
         $insertStmt = $sqlite->prepare("INSERT INTO `$table` VALUES ($placeholders)");
         $sqlite->beginTransaction();
-        foreach ($data as $row) { $insertStmt->execute(array_values($row)); }
+        foreach ($data as $row) {
+            $insertStmt->execute(array_values($row));
+        }
         $sqlite->commit();
         return $dbFile;
     }
 
-    public function exportFullDatabaseToSQLite() {
+    public function exportFullDatabaseToSQLite()
+    {
         $tempDir = __DIR__ . '/temp_db';
-        if (!is_dir($tempDir)) @mkdir($tempDir, 0777, true);
-        
+        if (!is_dir($tempDir))
+            @mkdir($tempDir, 0777, true);
+
         $dbFile = $tempDir . "/{$this->dbName}_FULL_" . time() . ".sqlite";
         $sqlite = new PDO("sqlite:" . $dbFile);
         $sqlite->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        
+
         $tables = $this->getTables();
         foreach ($tables as $table) {
             $data = $this->fetchData($this->buildRawQuery($table));
-            if (empty($data)) continue;
-            
+            if (empty($data))
+                continue;
+
             $cols = array_keys($data[0]);
-            $colDefs = implode(" TEXT, ", array_map(function($c) { return "`$c` TEXT"; }, $cols));
+            $colDefs = implode(" TEXT, ", array_map(function ($c) {
+                return "`$c` TEXT"; }, $cols));
             $sqlite->exec("CREATE TABLE IF NOT EXISTS `$table` ($colDefs)");
-            
+
             $placeholders = implode(", ", array_fill(0, count($cols), "?"));
             $insertStmt = $sqlite->prepare("INSERT INTO `$table` VALUES ($placeholders)");
             $sqlite->beginTransaction();
-            foreach ($data as $row) { $insertStmt->execute(array_values($row)); }
+            foreach ($data as $row) {
+                $insertStmt->execute(array_values($row));
+            }
             $sqlite->commit();
         }
         return $dbFile;
@@ -400,8 +474,9 @@ class DatabaseManager {
     // ==========================================
     // --- FITUR CRUD (EDITOR MODE) ---
     // ==========================================
-    
-    public function insertRecord($table, $data) {
+
+    public function insertRecord($table, $data)
+    {
         $cols = array_keys($data);
         $colString = implode('`, `', $cols);
         $placeholders = implode(', ', array_fill(0, count($cols), '?'));
@@ -410,7 +485,8 @@ class DatabaseManager {
         return $stmt->execute(array_values($data));
     }
 
-    public function updateRecord($table, $pkCol, $pkVal, $data) {
+    public function updateRecord($table, $pkCol, $pkVal, $data)
+    {
         $setParts = [];
         foreach ($data as $col => $val) {
             $setParts[] = "`$col` = ?";
@@ -423,7 +499,8 @@ class DatabaseManager {
         return $stmt->execute($values);
     }
 
-    public function deleteRecord($table, $pkCol, $pkVal) {
+    public function deleteRecord($table, $pkCol, $pkVal)
+    {
         $sql = "DELETE FROM `$table` WHERE `$pkCol` = ?";
         $stmt = $this->pdo->prepare($sql);
         return $stmt->execute([$pkVal]);
