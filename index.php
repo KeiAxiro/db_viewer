@@ -271,6 +271,16 @@ if ($pdo === null):
                 color: #e2e8f0;
                 padding: 10px;
             }
+
+            ::selection {
+                background-color: var(--theme-color);
+                color: #ffffff;
+            }
+
+            ::-moz-selection {
+                background-color: var(--theme-color);
+                color: #ffffff;
+            }
         </style>
     </head>
 
@@ -395,7 +405,6 @@ $mode = $_GET['mode'] ?? 'join';
 
 $nativeCols = $currentTable ? getNativeColumns($pdo, $currentTable, $driver) : [];
 
-// FIX SQLITE NO-PK FALLBACK
 $primaryKeyColPHP = $currentTable ? $dbManager->getPrimaryKey($currentTable) : 'id';
 if (!$primaryKeyColPHP && !empty($nativeCols)) {
     $primaryKeyColPHP = in_array('id', $nativeCols) ? 'id' : $nativeCols[0];
@@ -408,7 +417,6 @@ if (isset($_GET['action']) && $_GET['action'] === 'crud') {
     try {
         $op = $_POST['operation'];
         $table = $_POST['table'];
-
         $pkCol = $dbManager->getPrimaryKey($table);
         if (!$pkCol) {
             $tCols = getNativeColumns($pdo, $table, $driver);
@@ -448,6 +456,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'trace') {
     exit;
 }
 
+// --- API EKSPOR FULL DB SQLite ---
 if (isset($_GET['action']) && ($_GET['action'] === 'sqlite' || $_GET['action'] === 'sqlite_all')) {
     $file = ($_GET['action'] === 'sqlite_all') ? $dbManager->exportFullDatabaseToSQLite() : $dbManager->exportToSQLite($_GET['table']);
     if ($file && file_exists($file)) {
@@ -461,6 +470,42 @@ if (isset($_GET['action']) && ($_GET['action'] === 'sqlite' || $_GET['action'] =
         exit;
     }
     die("Gagal mengekspor data.");
+}
+
+// --- API EKSPOR JSON ALL ---
+if (isset($_GET['action']) && $_GET['action'] === 'export_json_all') {
+    if (ob_get_length())
+        ob_clean();
+    $out = [];
+    foreach ($tables as $t) {
+        $out[] = [
+            'type' => 'table',
+            'name' => $t,
+            'data' => $pdo->query("SELECT * FROM `$t`")->fetchAll(PDO::FETCH_ASSOC)
+        ];
+    }
+    header('Content-Type: application/json');
+    header('Content-Disposition: attachment; filename="' . $dbname . '_FULL_Backup.json"');
+    echo json_encode($out, JSON_PRETTY_PRINT);
+    exit;
+}
+
+// --- API EKSPOR CURRENT TABLE CSV ---
+if (isset($_GET['action']) && $_GET['action'] === 'export_csv') {
+    if (ob_get_length())
+        ob_clean();
+    $t = $_GET['table'];
+    $data = $pdo->query("SELECT * FROM `$t`")->fetchAll(PDO::FETCH_ASSOC);
+    header('Content-Type: text/csv');
+    header('Content-Disposition: attachment; filename="' . $t . '.csv"');
+    $out = fopen('php://output', 'w');
+    if (!empty($data)) {
+        fputcsv($out, array_keys($data[0]));
+        foreach ($data as $row)
+            fputcsv($out, $row);
+    }
+    fclose($out);
+    exit;
 }
 
 $db_error = null;
@@ -602,13 +647,11 @@ if ($currentTable) {
             animation: spin-anim 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
         }
 
-        /* 🔥 OPTIMASI 1: Hilangkan 'transition: all' untuk mencegah Layout Thrashing / Lag */
         td {
             transition: background-color 0.15s ease, color 0.15s ease;
             position: relative;
         }
 
-        /* 🔥 OPTIMASI 2: Animasi Pop-in untuk Lazy Tooltip */
         @keyframes popInTooltip {
             from {
                 opacity: 0;
@@ -621,10 +664,10 @@ if ($currentTable) {
             }
         }
 
-        /* 🔥 OPTIMASI 3: DRY (Don't Repeat Yourself) & Lazy Render.
-           Tooltip hanya diciptakan browser JIKA di-hover. Menghemat 10.000 nodes DOM! */
-        td.properties-trigger:hover::after,
-        td.properties-trigger:hover::before {
+        body.mode-inspect td.properties-trigger:hover::after,
+        body.mode-inspect td.properties-trigger:hover::before,
+        body.mode-editor td.properties-trigger:hover::after,
+        body.mode-editor td.properties-trigger:hover::before {
             position: absolute;
             left: 50%;
             z-index: 50;
@@ -632,7 +675,8 @@ if ($currentTable) {
             animation: popInTooltip 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
         }
 
-        td.properties-trigger:hover::after {
+        body.mode-inspect td.properties-trigger:hover::after,
+        body.mode-editor td.properties-trigger:hover::after {
             bottom: calc(100% + 4px);
             color: white;
             padding: 4px 10px;
@@ -644,43 +688,49 @@ if ($currentTable) {
             box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
         }
 
-        td.properties-trigger:hover::before {
+        body.mode-inspect td.properties-trigger:hover::before,
+        body.mode-editor td.properties-trigger:hover::before {
             bottom: 100%;
             border-width: 4px;
             border-style: solid;
         }
 
-        /* --- STATE 1: MODE INSPECT (Default) --- */
-        body:not(.editor-mode-active) td.properties-trigger:hover {
+        /* --- STATE 1: READONLY (DEFAULT) --- */
+        /* Text bisa diblok. Cursor biasa. Gak ada tooltip */
+        body:not(.mode-inspect):not(.mode-editor) td.properties-trigger {
+            cursor: text;
+        }
+
+        /* --- STATE 2: MODE INSPECT --- */
+        body.mode-inspect td.properties-trigger:hover {
             cursor: pointer;
             color: var(--theme-color);
             background: var(--theme-bg-subtle);
         }
 
-        body:not(.editor-mode-active) td.properties-trigger:hover::after {
-            content: "\f002 Inspect";
+        body.mode-inspect td.properties-trigger:hover::after {
+            content: "\f002  Inspect";
             background: var(--theme-color);
         }
 
-        body:not(.editor-mode-active) td.properties-trigger:hover::before {
-            content: "";
+        body.mode-inspect td.properties-trigger:hover::before {
             border-color: var(--theme-color) transparent transparent transparent;
         }
 
-        /* --- STATE 2: MODE EDITOR --- */
-        body.editor-mode-active td.properties-trigger:hover {
+        /* --- STATE 3: MODE EDITOR --- */
+        body.mode-editor td.properties-trigger:hover {
             cursor: cell;
             color: #10b981;
             background: rgba(16, 185, 129, 0.15);
         }
 
-        body.editor-mode-active td.properties-trigger:hover::after {
-            content: "\f044 Edit Baris";
+        body.mode-editor td.properties-trigger:hover::after {
+            content: "\f044  Edit";
             background: #10b981;
+            color: white;
         }
 
-        body.editor-mode-active td.properties-trigger:hover::before {
-            content: "";
+        body.mode-editor td.properties-trigger:hover::before {
             border-color: #10b981 transparent transparent transparent;
         }
 
@@ -728,6 +778,16 @@ if ($currentTable) {
         .properties-scroll::-webkit-scrollbar-thumb:hover {
             background: var(--theme-color);
         }
+
+        ::selection {
+            background-color: var(--theme-color);
+            color: #ffffff;
+        }
+
+        ::-moz-selection {
+            background-color: var(--theme-color);
+            color: #ffffff;
+        }
     </style>
     <style id="dynamicPinStyle"></style>
 
@@ -738,7 +798,11 @@ if ($currentTable) {
         document.documentElement.style.setProperty('--cell-py', savedDensity.py);
         document.documentElement.style.setProperty('--cell-px', savedDensity.px);
 
-        if (localStorage.getItem('voidDbEditorMode') === 'on') document.documentElement.classList.add('editor-mode-active-preload');
+        // Preload Class untuk mencegah blink
+        let preMode = localStorage.getItem('voidDbAppMode') || 'readonly';
+        if (localStorage.getItem('voidDbEditorMode') === 'on') { preMode = 'editor'; localStorage.removeItem('voidDbEditorMode'); localStorage.setItem('voidDbAppMode', 'editor'); }
+        if (preMode === 'inspect') document.documentElement.classList.add('mode-inspect-preload');
+        if (preMode === 'editor') document.documentElement.classList.add('mode-editor-preload');
     </script>
 </head>
 
@@ -827,28 +891,13 @@ if ($currentTable) {
                         </div>
                     </div>
                 </div>
-
-                <div class="pt-2">
-                    <label class="text-xs text-slate-400 block mb-3 uppercase font-bold tracking-wider"><i
-                            class="fa-solid fa-hard-drive mr-1"></i> Database Backup</label>
-                    <a href="?action=sqlite_all"
-                        class="w-full py-3 px-4 bg-slate-700 hover:bg-slate-600 border border-slate-600 rounded-lg text-white font-medium flex items-center justify-center gap-2">
-                        <i class="fa-solid fa-file-arrow-down text-theme"></i> Unduh Full DB (.sqlite)
-                    </a>
-                </div>
             </div>
             <footer class="border-t border-gray-200 dark:border-gray-800 py-2 text-sm pb-4">
                 <div
                     class="max-w-6xl mx-auto px-4 flex items-center justify-center gap-2 text-gray-500 dark:text-gray-400">
-
                     <span>Dibuat oleh</span>
-
-                    <span class="font-semibold text-gray-800 dark:text-gray-200">
-                        Keidjaru Axiro
-                    </span>
-
+                    <span class="font-semibold text-gray-800 dark:text-gray-200">Keidjaru Axiro</span>
                     <span class="opacity-40">•</span>
-
                     <a href="https://github.com/KeiAxiro" target="_blank"
                         class="flex items-center gap-1 hover:text-indigo-500 transition-colors">
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-4 h-4 fill-current">
@@ -857,11 +906,37 @@ if ($currentTable) {
                         </svg>
                         <span>KeiAxiro</span>
                     </a>
-
                 </div>
             </footer>
         </div>
+    </div>
 
+    <div id="disconnectModal"
+        class="fixed inset-0 z-[200] hidden items-center justify-center bg-slate-900/90 backdrop-blur-sm p-4">
+        <div class="bg-[#1e293b] border border-slate-600 rounded-2xl max-w-sm w-full p-6 shadow-2xl flex flex-col items-center text-center transform transition-transform duration-300 scale-95"
+            id="disconnectModalContent">
+            <div
+                class="w-16 h-16 bg-red-500/20 text-red-500 rounded-full flex items-center justify-center text-3xl mb-4 border border-red-500/30">
+                <i class="fa-solid fa-power-off"></i>
+            </div>
+            <h3 class="text-xl font-bold text-white mb-2">Putuskan Koneksi?</h3>
+            <p class="text-slate-400 text-sm mb-6">Sangat disarankan untuk mengunduh backup database sebelum Anda
+                keluar.</p>
+            <div class="flex flex-col w-full gap-3">
+                <a href="?action=sqlite_all" onclick="closeDisconnectModal()"
+                    class="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold text-sm flex items-center justify-center gap-2 transition-colors shadow-lg shadow-emerald-500/20 border border-emerald-500/50">
+                    <i class="fa-solid fa-download"></i> Unduh Full DB & Tetap Disini
+                </a>
+                <a href="?action=disconnect"
+                    class="w-full py-3 bg-red-500/10 hover:bg-red-500/20 border border-red-500/50 text-red-400 rounded-lg font-bold text-sm flex items-center justify-center gap-2 transition-colors">
+                    <i class="fa-solid fa-right-from-bracket"></i> Keluar Tanpa Backup
+                </a>
+                <button onclick="closeDisconnectModal()"
+                    class="w-full py-3 bg-slate-800 hover:bg-slate-700 border border-slate-600 text-white rounded-lg font-bold text-sm transition-colors mt-2">
+                    Batal
+                </button>
+            </div>
+        </div>
     </div>
 
     <aside id="appSidebar"
@@ -896,9 +971,9 @@ if ($currentTable) {
                             class="fa-solid <?= $driver === 'sqlite' ? 'fa-file-code text-emerald-400' : 'fa-server text-blue-400' ?> ml-1"></i>
                         <span class="truncate ml-1"
                             title="<?= htmlspecialchars($dbname) ?>"><?= htmlspecialchars($dbname) ?></span>
-                        <a href="?action=disconnect"
-                            class="text-red-400 hover:text-red-300 ml-auto mr-1 p-1 bg-red-500/10 rounded transition-colors"
-                            title="Disconnect"><i class="fa-solid fa-power-off"></i></a>
+                        <button onclick="showDisconnectModal()"
+                            class="text-red-400 hover:text-red-300 ml-auto mr-1 p-1 bg-red-500/10 hover:bg-red-500/20 rounded transition-colors border border-transparent hover:border-red-500/50"
+                            title="Disconnect"><i class="fa-solid fa-power-off"></i></button>
                     </div>
                 </div>
             </div>
@@ -906,9 +981,9 @@ if ($currentTable) {
                 <button onclick="toggleSettings()"
                     class="text-slate-400 hover:text-theme transition-colors p-2 rounded-lg hover:bg-slate-800"
                     title="Settings"><i class="fa-solid fa-gear fa-xl"></i></button>
-                <a href="?action=disconnect"
+                <button onclick="showDisconnectModal()"
                     class="text-red-400 hover:text-red-300 transition-colors p-2 rounded-lg hover:bg-red-900/30 mt-2"
-                    title="Disconnect"><i class="fa-solid fa-power-off fa-xl"></i></a>
+                    title="Disconnect"><i class="fa-solid fa-power-off fa-xl"></i></button>
             </div>
         </div>
         <div class="flex-1 overflow-y-auto py-4 space-y-1 hide-on-collapse flex flex-col">
@@ -924,6 +999,21 @@ if ($currentTable) {
                     <span class="truncate"><?= htmlspecialchars($t) ?></span>
                 </a>
             <?php endforeach; ?>
+
+            <div class="px-5 mt-auto pt-6 border-t border-slate-700 space-y-3 mb-4">
+                <p
+                    class="text-[10px] text-slate-500 uppercase font-bold tracking-widest mb-2 flex items-center gap-1.5">
+                    <i class="fa-solid fa-download"></i> Ekspor & Backup</p>
+                <a href="?action=sqlite_all"
+                    class="flex items-center gap-2 text-[11px] font-bold text-slate-400 hover:text-emerald-400 transition-colors py-1.5 px-2 rounded hover:bg-emerald-500/10 border border-transparent hover:border-emerald-500/30"><i
+                        class="fa-solid fa-database w-4 text-center"></i> Full DB (.sqlite)</a>
+                <a href="?action=export_json_all"
+                    class="flex items-center gap-2 text-[11px] font-bold text-slate-400 hover:text-amber-400 transition-colors py-1.5 px-2 rounded hover:bg-amber-500/10 border border-transparent hover:border-amber-500/30"><i
+                        class="fa-solid fa-file-code w-4 text-center"></i> Full DB (.json)</a>
+                <a href="?action=export_csv&table=<?= urlencode($currentTable) ?>"
+                    class="flex items-center gap-2 text-[11px] font-bold text-slate-400 hover:text-blue-400 transition-colors py-1.5 px-2 rounded hover:bg-blue-500/10 border border-transparent hover:border-blue-500/30"><i
+                        class="fa-solid fa-file-csv w-4 text-center"></i> Current Table (.csv)</a>
+            </div>
         </div>
     </aside>
 
@@ -960,12 +1050,12 @@ if ($currentTable) {
                         class="hidden px-3 py-1.5 md:py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs md:text-sm font-medium transition-all shadow-sm items-center gap-2 shrink-0 border border-emerald-500/50 mr-2">
                         <i class="fa-solid fa-plus"></i> <span class="hidden xl:inline">Data Baru</span>
                     </button>
-                    <button id="btnToggleEditorDesk" onclick="toggleGlobalEditorMode()"
-                        class="px-4 py-1.5 md:py-2 bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-lg text-xs md:text-sm font-medium transition-colors flex items-center gap-2 shadow-sm shrink-0 mr-2 text-slate-400">
-                        <i class="fa-solid fa-toggle-off text-lg" id="iconEditorDesk"></i> <span
-                            class="hidden lg:inline">Editor Mode</span>
-                    </button>
 
+                    <button id="btnToggleModeDesk" onclick="cycleAppMode()"
+                        class="px-4 py-1.5 md:py-2 bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-lg text-xs md:text-sm font-bold transition-colors flex items-center gap-2 shadow-sm shrink-0 mr-2 text-slate-400">
+                        <i class="fa-solid fa-eye-slash text-lg" id="iconModeDesk"></i> <span class="hidden lg:inline"
+                            id="textModeDesk">Read Only</span>
+                    </button>
 
                     <div class="relative group shrink-0">
                         <i
@@ -1033,7 +1123,7 @@ if ($currentTable) {
             <div class="overflow-auto rounded-xl border border-slate-700 bg-[#1e293b] shadow-lg relative flex-1">
                 <table class="w-full text-left border-collapse whitespace-nowrap" id="dataTable">
                     <?php if (!empty($rows)): ?>
-                        <thead class="bg-slate-800 text-slate-300 text-xs uppercase tracking-wider select-none shadow-sm">
+                        <thead class="bg-slate-800 text-slate-300 text-xs uppercase tracking-wider shadow-sm">
                             <tr id="tableHeaderRow">
                                 <?php foreach (array_keys($rows[0]) as $index => $col): ?>
                                     <th class="border-b border-slate-700 font-semibold bg-slate-800 cursor-pointer hover-text-theme transition-colors group/th cell-pad"
@@ -1056,7 +1146,7 @@ if ($currentTable) {
                         </thead>
                         <tbody class="text-xs md:text-sm divide-y divide-slate-700/50 font-mono text-slate-300">
                             <?php foreach ($rows as $row):
-                                $safeRowData = htmlspecialchars(json_encode($row, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE), ENT_QUOTES, 'UTF-8');
+                                $safeRowData = base64_encode(rawurlencode(json_encode($row, JSON_UNESCAPED_UNICODE)));
                                 ?>
                                 <tr class="hover:bg-slate-800/80 transition-colors data-row" data-row="<?= $safeRowData ?>">
                                     <?php
@@ -1086,29 +1176,6 @@ if ($currentTable) {
             </div>
         </div>
 
-        <footer class="border-t border-gray-200 dark:border-gray-800 py-2 text-sm">
-            <div class="max-w-6xl mx-auto px-4 flex items-center justify-center gap-2 text-gray-500 dark:text-gray-400">
-
-                <span>Dibuat oleh</span>
-
-                <span class="font-semibold text-gray-800 dark:text-gray-200">
-                    Keidjaru Axiro
-                </span>
-
-                <span class="opacity-40">•</span>
-
-                <a href="https://github.com/KeiAxiro" target="_blank"
-                    class="flex items-center gap-1 hover:text-indigo-500 transition-colors">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-4 h-4 fill-current">
-                        <path
-                            d="M12 .5C5.73.5.99 5.24.99 11.5c0 4.86 3.15 8.98 7.52 10.44.55.1.75-.24.75-.53 0-.26-.01-.96-.02-1.88-3.06.66-3.71-1.48-3.71-1.48-.5-1.27-1.23-1.6-1.23-1.6-1-.69.08-.68.08-.68 1.11.08 1.7 1.14 1.7 1.14.99 1.7 2.6 1.21 3.24.93.1-.72.39-1.21.71-1.49-2.44-.28-5-1.22-5-5.43 0-1.2.43-2.18 1.14-2.95-.11-.28-.5-1.43.11-2.98 0 0 .94-.3 3.08 1.13A10.7 10.7 0 0112 6.8c.95 0 1.91.13 2.81.39 2.14-1.44 3.08-1.13 3.08-1.13.61 1.55.22 2.7.11 2.98.71.77 1.14 1.75 1.14 2.95 0 4.22-2.57 5.14-5.02 5.42.4.34.76 1.01.76 2.04 0 1.47-.01 2.66-.01 3.02 0 .29.2.64.76.53 4.37-1.46 7.52-5.58 7.52-10.44C23.01 5.24 18.27.5 12 .5z" />
-                    </svg>
-                    <span>KeiAxiro</span>
-                </a>
-
-            </div>
-        </footer>
-
         <div class="md:hidden fixed bottom-6 right-6 z-[60]">
             <button id="fabBtn"
                 class="w-14 h-14 bg-theme text-white rounded-full shadow-[0_4px_15px_rgba(0,0,0,0.5)] flex items-center justify-center text-xl hover:scale-105 transition-transform"
@@ -1133,11 +1200,11 @@ if ($currentTable) {
             <div class="p-5 overflow-y-auto space-y-6">
                 <div>
                     <label class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3 block"><i
-                            class="fa-solid fa-power-off mr-1"></i> Editor Mode</label>
-                    <button id="btnToggleEditorMob" onclick="toggleGlobalEditorMode()"
+                            class="fa-solid fa-power-off mr-1"></i> App Mode</label>
+                    <button id="btnToggleModeMob" onclick="cycleAppMode()"
                         class="w-full py-3 bg-slate-800 border border-slate-600 rounded-lg text-sm font-bold transition-colors flex items-center justify-center gap-2 shadow-sm text-slate-400">
-                        <i class="fa-solid fa-toggle-off text-xl" id="iconEditorMob"></i> <span id="textEditorMob">Mode
-                            Editor: Nonaktif</span>
+                        <i class="fa-solid fa-eye-slash text-xl" id="iconModeMob"></i> <span id="textModeMob">Mode: Read
+                            Only</span>
                     </button>
                 </div>
                 <div id="containerAddRecordMob" class="hidden">
@@ -1164,14 +1231,6 @@ if ($currentTable) {
                 </div>
                 <div>
                     <label class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3 block"><i
-                            class="fa-solid fa-download mr-1"></i> Ekspor Data</label>
-                    <a href="?action=sqlite&table=<?= urlencode($currentTable) ?>"
-                        class="w-full py-3 bg-slate-800 border border-slate-600 text-slate-200 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2 shadow-sm">
-                        <i class="fa-solid fa-file-arrow-down text-theme"></i> Download (.sqlite)
-                    </a>
-                </div>
-                <div>
-                    <label class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3 block"><i
                             class="fa-solid fa-eye-slash mr-1"></i> Sembunyikan Kolom</label>
                     <div id="mobileColumnToggles"
                         class="grid grid-cols-2 gap-2 bg-slate-900/50 p-3 rounded-xl border border-slate-700"></div>
@@ -1181,8 +1240,8 @@ if ($currentTable) {
     </main>
 
     <div id="propertiesModal"
-        class="fixed inset-0 z-[130] hidden items-center justify-center bg-slate-900/90 backdrop-blur-md transition-opacity">
-        <div class="bg-[#1e293b] border border-slate-600 w-full h-full md:max-w-[95vw] lg:max-w-7xl md:h-[90vh] md:rounded-2xl shadow-2xl flex flex-col overflow-hidden transform scale-95 transition-transform duration-200"
+        class="fixed inset-0 z-[130] hidden items-center justify-center bg-slate-900/90 backdrop-blur-md transition-opacity p-2 md:p-0">
+        <div class="bg-[#1e293b] border border-slate-600 w-full h-full md:max-w-[95vw] lg:max-w-7xl md:h-[90vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden transform scale-95 transition-transform duration-200"
             id="propertiesModalContent">
 
             <div
@@ -1225,12 +1284,13 @@ if ($currentTable) {
                     <div
                         class="p-4 bg-slate-800/50 border-b border-slate-700 shrink-0 flex justify-between items-center">
                         <h4 class="font-bold text-sm text-slate-300 uppercase tracking-widest flex items-center gap-2">
-                            <i class="fa-solid fa-database text-emerald-400"></i> Data Record</h4>
+                            <i class="fa-solid fa-database text-emerald-400"></i> Data Record
+                        </h4>
 
-                        <button onclick="toggleGlobalEditorMode()" id="editorStatusBadge"
-                            title="Klik untuk On/Off Mode Editor"
-                            class="text-[10px] bg-amber-500/20 hover:bg-amber-500/30 text-amber-500 px-2.5 py-1 rounded border border-amber-500/50 font-bold tracking-widest uppercase transition-colors flex items-center gap-1.5 shadow-sm">
-                            <i class='fa-solid fa-toggle-off text-sm'></i> Read Only
+                        <button onclick="cycleAppMode()" id="editorStatusBadge"
+                            title="Klik untuk mengganti mode (Read/Inspect/Edit)"
+                            class="text-[10px] bg-slate-800 text-slate-400 px-2.5 py-1 rounded border border-slate-600 font-bold tracking-widest uppercase transition-colors flex items-center gap-1.5 shadow-sm hover:bg-slate-700">
+                            <i class='fa-solid fa-eye-slash text-sm'></i> Read Only
                         </button>
                     </div>
 
@@ -1294,7 +1354,7 @@ if ($currentTable) {
                     <div class="flex-1 overflow-y-auto properties-scroll p-4 md:p-6" id="tracerBody">
                         <div class="flex flex-col items-center justify-center h-full text-slate-500 opacity-50"><i
                                 class="fa-solid fa-network-wired text-6xl mb-4"></i>
-                            <p class="text-sm">Klik sebuah sel untuk melacak relasi datanya.</p>
+                            <p class="text-sm mt-3">Klik sebuah sel untuk melacak relasi datanya.</p>
                         </div>
                     </div>
                 </div>
@@ -1303,32 +1363,31 @@ if ($currentTable) {
     </div>
 
     <script>
-        // --- 0. STATE EDITOR MODE (GLOBAL) ---
-        let isEditorActive = localStorage.getItem('voidDbEditorMode') === 'on';
-        let currentEditRowData = null; // Menyimpan baris yg sedang diedit
+        // --- 0. STATE 3-MODE (GLOBAL) ---
+        // readonly -> inspect -> editor -> readonly
+        let currentAppMode = localStorage.getItem('voidDbAppMode') || 'readonly';
+
+        // Backward compatibility migration
+        if (localStorage.getItem('voidDbEditorMode') === 'on') {
+            currentAppMode = 'editor';
+            localStorage.removeItem('voidDbEditorMode');
+            localStorage.setItem('voidDbAppMode', 'editor');
+        }
+
+        let currentEditRowData = null;
         const activeTable = "<?= htmlspecialchars($currentTable ?? '') ?>";
         const primaryKeyCol = "<?= htmlspecialchars($primaryKeyColPHP) ?>";
         const nativeCols = <?= json_encode($nativeCols ?? []) ?>;
 
         document.addEventListener('DOMContentLoaded', () => {
-            applyEditorModeState();
+            applyAppModeState();
 
-            // [BARU] Logika Pemulihan FAB Sheet yang Lebih Kuat
             if (localStorage.getItem('voidDbFabState') === 'open') {
                 const sheet = document.getElementById('mobileToolsSheet');
                 const overlay = document.getElementById('mobileToolsOverlay');
-
-                // Matikan class animasi bawaan tailwind sesaat
                 sheet.classList.remove('transition-transform', 'duration-300');
-
-                // Setel posisi ke terbuka
-                sheet.classList.remove('translate-y-full');
-                overlay.classList.remove('hidden');
-
-                // Nyalakan kembali animasinya setelah halaman selesai di-render
-                setTimeout(() => {
-                    sheet.classList.add('transition-transform', 'duration-300');
-                }, 50);
+                sheet.classList.remove('translate-y-full'); overlay.classList.remove('hidden');
+                setTimeout(() => { sheet.classList.add('transition-transform', 'duration-300'); }, 50);
             }
 
             if (window.innerWidth >= 768) {
@@ -1337,63 +1396,91 @@ if ($currentTable) {
             }
         });
 
-        function toggleGlobalEditorMode() {
-            isEditorActive = !isEditorActive;
-            localStorage.setItem('voidDbEditorMode', isEditorActive ? 'on' : 'off');
-            applyEditorModeState();
+        function cycleAppMode() {
+            if (currentAppMode === 'readonly') currentAppMode = 'inspect';
+            else if (currentAppMode === 'inspect') currentAppMode = 'editor';
+            else currentAppMode = 'readonly';
+
+            localStorage.setItem('voidDbAppMode', currentAppMode);
+            applyAppModeState();
         }
 
-        function applyEditorModeState() {
-            const btnDesk = document.getElementById('btnToggleEditorDesk'), iconDesk = document.getElementById('iconEditorDesk'), btnAddDesk = document.getElementById('btnAddRecordDesk');
-            if (btnDesk) {
-                if (isEditorActive) {
-                    btnDesk.className = "px-4 py-1.5 md:py-2 bg-slate-900 border border-emerald-500/50 rounded-lg text-xs md:text-sm font-bold transition-colors flex items-center gap-2 shadow-sm shrink-0 mr-2 text-emerald-400";
-                    iconDesk.className = "fa-solid fa-toggle-on text-lg";
-                    btnAddDesk.classList.remove('hidden'); btnAddDesk.classList.add('flex');
-                } else {
-                    btnDesk.className = "px-4 py-1.5 md:py-2 bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-lg text-xs md:text-sm font-medium transition-colors flex items-center gap-2 shadow-sm shrink-0 mr-2 text-slate-400";
-                    iconDesk.className = "fa-solid fa-toggle-off text-lg";
-                    btnAddDesk.classList.add('hidden'); btnAddDesk.classList.remove('flex');
-                }
-            }
+        function applyAppModeState() {
+            // UI Elements
+            const btnDesk = document.getElementById('btnToggleModeDesk');
+            const iconDesk = document.getElementById('iconModeDesk');
+            const textDesk = document.getElementById('textModeDesk');
 
-            const btnMob = document.getElementById('btnToggleEditorMob'), iconMob = document.getElementById('iconEditorMob'), textMob = document.getElementById('textEditorMob'), containerAddMob = document.getElementById('containerAddRecordMob');
-            if (btnMob) {
-                if (isEditorActive) {
-                    btnMob.className = "w-full py-3 bg-slate-900 border border-emerald-500/50 rounded-lg text-sm font-bold transition-colors flex items-center justify-center gap-2 shadow-sm text-emerald-400";
-                    iconMob.className = "fa-solid fa-toggle-on text-xl"; textMob.innerText = "Mode Editor: Aktif";
-                    containerAddMob.classList.remove('hidden');
-                } else {
-                    btnMob.className = "w-full py-3 bg-slate-800 border border-slate-600 rounded-lg text-sm font-bold transition-colors flex items-center justify-center gap-2 shadow-sm text-slate-400";
-                    iconMob.className = "fa-solid fa-toggle-off text-xl"; textMob.innerText = "Mode Editor: Nonaktif";
-                    containerAddMob.classList.add('hidden');
-                }
-            }
+            const btnMob = document.getElementById('btnToggleModeMob');
+            const iconMob = document.getElementById('iconModeMob');
+            const textMob = document.getElementById('textModeMob');
 
-            // Memperbarui Badge (Chip) toggle di dalam Jendela Properties
+            const btnAddDesk = document.getElementById('btnAddRecordDesk');
+            const containerAddMob = document.getElementById('containerAddRecordMob');
+
             const badgeStatus = document.getElementById('editorStatusBadge');
-            if (badgeStatus) {
-                if (isEditorActive) {
-                    badgeStatus.className = "text-[10px] bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 px-2.5 py-1 rounded border border-emerald-500/50 font-bold tracking-widest uppercase transition-colors flex items-center gap-1.5 shadow-sm";
-                    badgeStatus.innerHTML = "<i class='fa-solid fa-toggle-on text-sm'></i> Editing";
-                } else {
-                    badgeStatus.className = "text-[10px] bg-amber-500/20 hover:bg-amber-500/30 text-amber-500 px-2.5 py-1 rounded border border-amber-500/50 font-bold tracking-widest uppercase transition-colors flex items-center gap-1.5 shadow-sm";
-                    badgeStatus.innerHTML = "<i class='fa-solid fa-toggle-off text-sm'></i> Read Only";
+
+            // Setup Desktop Button
+            if (btnDesk) {
+                btnDesk.className = "px-4 py-1.5 md:py-2 border rounded-lg text-xs md:text-sm font-bold transition-colors flex items-center gap-2 shadow-sm shrink-0 mr-2";
+                if (currentAppMode === 'readonly') {
+                    btnDesk.classList.add('bg-slate-800', 'border-slate-600', 'text-slate-400', 'hover:bg-slate-700');
+                    iconDesk.className = "fa-solid fa-eye-slash text-lg"; textDesk.innerText = "Read Only";
+                    btnAddDesk.classList.add('hidden'); btnAddDesk.classList.remove('flex');
+                } else if (currentAppMode === 'inspect') {
+                    btnDesk.classList.add('bg-theme', 'border-theme', 'text-white', 'hover-bg-theme');
+                    iconDesk.className = "fa-solid fa-magnifying-glass text-lg"; textDesk.innerText = "Inspect Mode";
+                    btnAddDesk.classList.add('hidden'); btnAddDesk.classList.remove('flex');
+                } else if (currentAppMode === 'editor') {
+                    btnDesk.classList.add('bg-emerald-600/20', 'border-emerald-500/50', 'text-emerald-400', 'hover:bg-emerald-600/30');
+                    iconDesk.className = "fa-solid fa-pen-to-square text-lg"; textDesk.innerText = "Editor Mode";
+                    btnAddDesk.classList.remove('hidden'); btnAddDesk.classList.add('flex');
                 }
             }
 
-            // Jika modal Properties sedang terbuka, otomatis render ulang form agar bisa diketik / dilock!
+            // Setup Mobile Sheet Button
+            if (btnMob) {
+                btnMob.className = "w-full py-3 border rounded-lg text-sm font-bold transition-colors flex items-center justify-center gap-2 shadow-sm";
+                if (currentAppMode === 'readonly') {
+                    btnMob.classList.add('bg-slate-800', 'border-slate-600', 'text-slate-400');
+                    iconMob.className = "fa-solid fa-eye-slash text-xl"; textMob.innerText = "Mode: Read Only";
+                    containerAddMob.classList.add('hidden');
+                } else if (currentAppMode === 'inspect') {
+                    btnMob.classList.add('bg-theme', 'border-theme', 'text-white');
+                    iconMob.className = "fa-solid fa-magnifying-glass text-xl"; textMob.innerText = "Mode: Inspect";
+                    containerAddMob.classList.add('hidden');
+                } else if (currentAppMode === 'editor') {
+                    btnMob.classList.add('bg-emerald-600/20', 'border-emerald-500/50', 'text-emerald-400');
+                    iconMob.className = "fa-solid fa-pen-to-square text-xl"; textMob.innerText = "Mode: Editor";
+                    containerAddMob.classList.remove('hidden');
+                }
+            }
+
+            // Setup Modal Badge (Inside Properties)
+            if (badgeStatus) {
+                badgeStatus.className = "text-[10px] px-2.5 py-1 rounded border font-bold tracking-widest uppercase transition-colors flex items-center gap-1.5 shadow-sm";
+                if (currentAppMode === 'readonly') {
+                    badgeStatus.classList.add('bg-slate-800', 'border-slate-600', 'text-slate-400', 'hover:bg-slate-700');
+                    badgeStatus.innerHTML = "<i class='fa-solid fa-eye-slash text-sm'></i> Read Only";
+                } else if (currentAppMode === 'inspect') {
+                    badgeStatus.classList.add('bg-blue-500/20', 'border-blue-500/50', 'text-blue-400', 'hover:bg-blue-500/30');
+                    badgeStatus.innerHTML = "<i class='fa-solid fa-magnifying-glass text-sm'></i> Inspecting";
+                } else if (currentAppMode === 'editor') {
+                    badgeStatus.classList.add('bg-emerald-500/20', 'border-emerald-500/50', 'text-emerald-400', 'hover:bg-emerald-500/30');
+                    badgeStatus.innerHTML = "<i class='fa-solid fa-pen text-sm'></i> Editing";
+                }
+            }
+
+            // Body Classes for Tooltips
+            document.body.classList.remove('mode-inspect', 'mode-editor');
+            document.documentElement.classList.remove('mode-inspect-preload', 'mode-editor-preload');
+            if (currentAppMode === 'inspect') document.body.classList.add('mode-inspect');
+            if (currentAppMode === 'editor') document.body.classList.add('mode-editor');
+
+            // Refresh Properties Pane if open
             const propModal = document.getElementById('propertiesModal');
             if (propModal && !propModal.classList.contains('hidden')) {
                 updateEditorPane(currentEditTable, currentEditRowData);
-            }
-
-            if (isEditorActive) {
-                document.body.classList.add('editor-mode-active');
-                document.documentElement.classList.remove('editor-mode-active-preload');
-            } else {
-                document.body.classList.remove('editor-mode-active');
-                document.documentElement.classList.remove('editor-mode-active-preload');
             }
         }
 
@@ -1410,15 +1497,20 @@ if ($currentTable) {
         };
 
         function handleCellClick(td, clickedColName) {
+            // MENGIZINKAN TEXT SELECTION AMAN TANPA MEMBUKA MODAL!
+            if (currentAppMode === 'readonly') return;
+
             const tr = td.closest('tr');
             if (!tr.dataset.row) return;
-            const rowData = JSON.parse(tr.dataset.row);
+
+            // PENGGUNAAN BASE64 -> 100% AMAN DARI QUOTE HELL
+            const rowData = JSON.parse(decodeURIComponent(atob(tr.dataset.row)));
             openPropertiesModal(clickedColName, rowData[clickedColName], rowData, activeTable);
         }
 
         function updateEditorPane(tableName, rowData) {
             currentEditTable = tableName;
-            currentEditRowData = rowData; // Simpan untuk referensi saat mode editor di-toggle
+            currentEditRowData = rowData;
             document.getElementById('propTargetTable').innerText = tableName;
 
             const container = document.getElementById('editorFormContainer');
@@ -1436,7 +1528,7 @@ if ($currentTable) {
                 let locked = !isNative || (isPk && rowData !== null);
                 let badgeHtml = !isNative ? '<span class="text-blue-400 text-[9px] px-1.5 py-0.5 rounded border border-blue-400/30 bg-blue-400/10 ml-2 uppercase tracking-widest">[Joined]</span>' : (isPk && rowData !== null ? '<span class="text-red-400 text-[9px] px-1.5 py-0.5 rounded border border-red-400/30 bg-red-400/10 ml-2 uppercase tracking-widest">[PK]</span>' : '');
 
-                const finalReadonly = locked || !isEditorActive;
+                const finalReadonly = locked || currentAppMode !== 'editor';
                 const baseClass = finalReadonly ? 'w-full bg-slate-900/50 border border-slate-700/50 rounded-lg px-3 py-2 text-sm text-slate-500 cursor-not-allowed font-mono shadow-inner outline-none' : 'w-full bg-[#0f172a] border border-slate-600 rounded-lg px-3 py-2 text-sm text-white focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none transition-all font-mono placeholder-slate-600';
 
                 let inputHtml = (isLongText && !finalReadonly) ? `<textarea name="${col}" rows="3" class="${baseClass}">${safeVal}</textarea>` : `<input type="text" ${isNative ? `name="${col}"` : ''} value="${safeVal}" ${finalReadonly ? 'readonly tabindex="-1"' : ''} class="${baseClass}" placeholder="${isNative ? 'Ketik nilai...' : ''}">`;
@@ -1458,7 +1550,7 @@ if ($currentTable) {
                     html += buildInput(col, rowData[col], col === guessedPkCol, isNative);
                 });
 
-                if (isEditorActive) {
+                if (currentAppMode === 'editor') {
                     btnDelete.classList.remove('hidden'); btnDelete.classList.add('flex'); btnDelete.onclick = () => deleteEditorRecord(currentEditPkVal);
                     footerAction.classList.remove('hidden');
                 } else {
@@ -1468,7 +1560,7 @@ if ($currentTable) {
                 currentEditPkVal = null;
                 nativeCols.forEach(col => { html += buildInput(col, '', col === guessedPkCol, true); });
                 btnDelete.classList.add('hidden'); btnDelete.classList.remove('flex');
-                if (isEditorActive) footerAction.classList.remove('hidden'); else footerAction.classList.add('hidden');
+                if (currentAppMode === 'editor') footerAction.classList.remove('hidden'); else footerAction.classList.add('hidden');
             }
 
             container.innerHTML = html + '</form>';
@@ -1479,7 +1571,6 @@ if ($currentTable) {
             const content = document.getElementById('propertiesModalContent');
             const targetCellSpan = document.getElementById('propTargetCell');
 
-            // [PERBAIKAN] Izinkan nilai null / kosong untuk tetap diproses
             if (triggerColName && triggerCellValue !== undefined) {
                 let displayVal = (triggerCellValue === null || triggerCellValue === '') ? 'NULL' : triggerCellValue;
                 targetCellSpan.innerHTML = `(<span class="text-blue-400">${triggerColName}</span>=<span class="text-amber-400">${escapeHTML(displayVal)}</span>)`;
@@ -1489,11 +1580,10 @@ if ($currentTable) {
                 targetCellSpan.innerHTML = '';
             }
 
-            if (window.innerWidth < 768) switchPropertiesTab(rowData === null || isEditorActive ? 'editor' : 'inspector');
+            if (window.innerWidth < 768) switchPropertiesTab(rowData === null || currentAppMode === 'editor' ? 'editor' : 'inspector');
 
             updateEditorPane(tableName, rowData);
 
-            // [PERBAIKAN] Hapus pengecekan yang memblokir null
             if (rowData !== null && triggerColName && triggerCellValue !== undefined) {
                 startTrace(tableName, triggerColName, triggerCellValue);
             } else if (!rowData) {
@@ -1550,10 +1640,10 @@ if ($currentTable) {
 
             if (tab === 'editor') {
                 paneEd.style.transform = 'translateX(0)'; paneIn.style.transform = 'translateX(100%)';
-                btnEd.className = actBtn; btnIn.className = inactBtn;
+                if (btnEd) btnEd.className = actBtn; if (btnIn) btnIn.className = inactBtn;
             } else {
                 paneEd.style.transform = 'translateX(-100%)'; paneIn.style.transform = 'translateX(0)';
-                btnIn.className = actBtn; btnEd.className = inactBtn;
+                if (btnIn) btnIn.className = actBtn; if (btnEd) btnEd.className = inactBtn;
             }
         }
 
@@ -1589,25 +1679,23 @@ if ($currentTable) {
         // --- 2. DEEP INSPECTOR LOGIC ---
         let traceHistory = []; let currentTraceData = null; let currentTracerMode = 'raw';
 
-        // Mode switch Inspector (Raw/Join) yang sempat hilang!
         function changeTracerMode(mode) {
             currentTracerMode = mode;
             const actCls = 'px-3 py-1 rounded text-[10px] md:text-xs font-bold bg-theme text-white shadow-sm';
             const inactCls = 'px-3 py-1 rounded text-[10px] md:text-xs font-bold text-slate-400 hover:text-white transition-colors';
 
-            const rawBtn = document.getElementById('tracerModeRaw');
-            const joinBtn = document.getElementById('tracerModeJoin');
+            const rawBtn = document.getElementById('tracerModeRaw'), joinBtn = document.getElementById('tracerModeJoin');
             if (rawBtn) rawBtn.className = mode === 'raw' ? actCls : inactCls;
             if (joinBtn) joinBtn.className = mode === 'join' ? actCls : inactCls;
 
             if (traceHistory.length > 0) {
-                const last = traceHistory[traceHistory.length - 1];
-                executeTrace(last.table, last.col, last.val, true);
+                const last = traceHistory[traceHistory.length - 1]; executeTrace(last.table, last.col, last.val, true);
             }
         }
 
-        function inspectAndEdit(tableName, colName, value, rowJsonStr) {
-            const rowObj = JSON.parse(unEscapeHTML(rowJsonStr));
+        function inspectAndEdit(tableName, colName, b64RowStr) {
+            const rowObj = JSON.parse(decodeURIComponent(atob(b64RowStr)));
+            const value = rowObj[colName];
             if (window.innerWidth < 768) switchPropertiesTab('inspector');
             pushTrace(tableName, colName, value);
             updateEditorPane(tableName, rowObj);
@@ -1631,7 +1719,6 @@ if ($currentTable) {
         async function executeTrace(tableName, colName, value, skipPush = false) {
             const tBody = document.getElementById('tracerBody');
 
-            // Konversi nilai null asli dari JS agar aman dikirim ke Backend
             let sendValue = value === null ? 'NULL' : value;
 
             if (!skipPush) traceHistory.push({ table: tableName, col: colName, val: sendValue });
@@ -1651,6 +1738,14 @@ if ($currentTable) {
 
                 currentTraceData = resData.data;
                 updateFilterBadges();
+
+                document.querySelectorAll('.filter-btn').forEach(b => {
+                    b.classList.remove('bg-theme', 'text-white', 'shadow-sm');
+                    b.classList.add('text-slate-400', 'hover:bg-slate-700');
+                });
+                document.querySelector('.filter-btn[data-filter="all"]').classList.remove('text-slate-400', 'hover:bg-slate-700');
+                document.querySelector('.filter-btn[data-filter="all"]').classList.add('bg-theme', 'text-white', 'shadow-sm');
+
                 renderTracerData('all');
             } catch (err) {
                 tBody.innerHTML = `<div class="text-red-400 bg-red-900/20 border border-red-900 p-6 rounded-xl flex items-center gap-3"><i class="fa-solid fa-triangle-exclamation fa-2x"></i> Error: ${err.message}</div>`;
@@ -1714,11 +1809,11 @@ if ($currentTable) {
                                     </thead>
                                     <tbody class="divide-y divide-slate-700/50 font-mono">
                                         ${group.data.map(row => {
-                        const rowStr = escapeHTML(JSON.stringify(row));
+                        const b64RowStr = btoa(encodeURIComponent(JSON.stringify(row)));
                         return `
                                             <tr class="hover:bg-slate-700/50 transition-colors">
                                                 ${Object.entries(row).map(([k, v]) => `
-                                                    <td class="px-3 py-2 text-slate-300 cursor-pointer hover-text-theme whitespace-nowrap properties-trigger" onclick="inspectAndEdit('${group.table}', '${k}', '${escapeHTML(v)}', '${rowStr}')">
+                                                    <td class="px-3 py-2 text-slate-300 cursor-pointer hover-text-theme whitespace-nowrap properties-trigger" onclick="inspectAndEdit('${group.table}', '${k}', '${b64RowStr}')">
                                                         ${v !== null ? escapeHTML(v) : '<span class="text-slate-600 italic">NULL</span>'}
                                                     </td>
                                                 `).join('')}
@@ -1765,8 +1860,12 @@ if ($currentTable) {
             const sheet = document.getElementById('mobileToolsSheet'), overlay = document.getElementById('mobileToolsOverlay');
             let willOpen = forceState !== null ? forceState : sheet.classList.contains('translate-y-full');
             if (willOpen) {
-                sheet.classList.remove('translate-y-full'); overlay.classList.remove('hidden'); localStorage.setItem('voidDbFabState', 'open');
-            } else { sheet.classList.add('translate-y-full'); overlay.classList.add('hidden'); localStorage.setItem('voidDbFabState', 'closed'); }
+                sheet.classList.remove('translate-y-full'); overlay.classList.remove('hidden');
+                localStorage.setItem('voidDbFabState', 'open');
+            } else {
+                sheet.classList.add('translate-y-full'); overlay.classList.add('hidden');
+                localStorage.setItem('voidDbFabState', 'closed');
+            }
         }
 
         // --- RESTORASI SIDEBAR, SETTINGS, HIDE, TEMA, A11Y ---
@@ -1801,6 +1900,20 @@ if ($currentTable) {
                 const currentColor = getComputedStyle(document.documentElement).getPropertyValue('--theme-color').trim();
                 document.getElementById('colorPicker').value = currentColor || '#3b82f6';
             }
+        }
+
+        function showDisconnectModal() {
+            const m = document.getElementById('disconnectModal');
+            const content = document.getElementById('disconnectModalContent');
+            m.classList.remove('hidden'); m.classList.add('flex');
+            setTimeout(() => { content.classList.remove('scale-95'); }, 10);
+        }
+
+        function closeDisconnectModal() {
+            const m = document.getElementById('disconnectModal');
+            const content = document.getElementById('disconnectModalContent');
+            content.classList.add('scale-95');
+            setTimeout(() => { m.classList.add('hidden'); m.classList.remove('flex'); }, 200);
         }
 
         function setTheme(hexColor) {
