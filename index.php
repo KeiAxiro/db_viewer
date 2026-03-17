@@ -3,6 +3,51 @@
 require_once 'config.php';
 require_once 'DatabaseManager.php';
 
+// Fungsi Helper Rahasia: Mengubah array PHP menjadi Tabel di SQLite Sementara
+function convertArrayToSQLite($pdo, $tableName, $data) {
+    if (empty($data)) {
+        $pdo->exec("CREATE TABLE `$tableName` (`id` INTEGER PRIMARY KEY)");
+        return;
+    }
+    $tableName = preg_replace('/[^a-zA-Z0-9_]/', '_', $tableName);
+    
+    // Kumpulkan semua nama kolom dari seluruh baris (Menghindari JSON berlubang)
+    $allKeys = [];
+    foreach ($data as $row) {
+        if (is_array($row)) {
+            foreach (array_keys($row) as $k) $allKeys[$k] = true;
+        }
+    }
+    $cols = array_keys($allKeys);
+    if (empty($cols)) $cols = ['Value'];
+
+    $colDefs = implode(", ", array_map(function($c) { 
+        $cClean = preg_replace('/[^a-zA-Z0-9_]/', '_', $c);
+        return "`$cClean` TEXT"; 
+    }, $cols));
+    
+    $pdo->exec("DROP TABLE IF EXISTS `$tableName`");
+    $pdo->exec("CREATE TABLE `$tableName` ($colDefs)");
+
+    $placeholders = implode(", ", array_fill(0, count($cols), "?"));
+    $stmt = $pdo->prepare("INSERT INTO `$tableName` VALUES ($placeholders)");
+    
+    $pdo->beginTransaction();
+    foreach ($data as $item) {
+        $rowVals = [];
+        if (is_scalar($item)) {
+            $rowVals[] = $item;
+        } else {
+            foreach ($cols as $c) {
+                $val = $item[$c] ?? null;
+                $rowVals[] = is_scalar($val) ? $val : ($val === null ? null : json_encode($val));
+            }
+        }
+        $stmt->execute($rowVals);
+    }
+    $pdo->commit();
+}
+
 // --- HANDLE THEME SAVE (GLOBAL SESSION) ---
 if (isset($_GET['action']) && $_GET['action'] === 'save_theme') {
     $_SESSION['theme_color'] = $_POST['color'];
@@ -11,7 +56,6 @@ if (isset($_GET['action']) && $_GET['action'] === 'save_theme') {
     exit;
 }
 
-// --- PERSIAPAN VARIABEL TEMA GLOBAL ---
 $themeColor = $_SESSION['theme_color'] ?? '#3b82f6';
 $themeHover = $_SESSION['theme_color_hover'] ?? '#2563eb';
 $hex = ltrim($themeColor, '#');
@@ -19,7 +63,6 @@ if (strlen($hex) == 3) $hex = str_repeat(substr($hex,0,1), 2) . str_repeat(subst
 list($r, $g, $b) = sscanf($hex, "%02x%02x%02x");
 $themeSubtle = "rgba($r, $g, $b, 0.15)";
 
-// --- HANDLE AJAX GET DATABASES ---
 if (isset($_GET['action']) && $_GET['action'] === 'get_dbs') {
     header('Content-Type: application/json');
     try {
@@ -36,23 +79,18 @@ if (isset($_GET['action']) && $_GET['action'] === 'get_dbs') {
     exit;
 }
 
-// --- HANDLE DISCONNECT ---
 if (isset($_GET['action']) && $_GET['action'] === 'disconnect') {
     unset($_SESSION['db_connection']); 
     header("Location: index.php");
     exit;
 }
 
-// --- PERSIAPAN FOLDER TEMP & AUTO CLEANUP ---
 $tempDir = __DIR__ . '/temp_db';
 if (!is_dir($tempDir)) @mkdir($tempDir, 0777, true);
-// Hapus file yang lebih tua dari 12 jam (43200 detik)
 if ($handle = opendir($tempDir)) {
     while (false !== ($file = readdir($handle))) {
         $filepath = $tempDir . '/' . $file;
-        if (is_file($filepath) && time() - filemtime($filepath) > 43200) {
-            @unlink($filepath);
-        }
+        if (is_file($filepath) && time() - filemtime($filepath) > 43200) @unlink($filepath);
     }
     closedir($handle);
 }
@@ -84,6 +122,81 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             $errCodes = [ UPLOAD_ERR_INI_SIZE => 'Ukuran file melebihi batas php.ini.', UPLOAD_ERR_PARTIAL => 'Terupload sebagian.', UPLOAD_ERR_NO_FILE => 'Tidak ada file yang diunggah.' ];
             $conn_error = "Upload Gagal: " . ($errCodes[$file['error']] ?? "Error Code {$file['error']}");
+        }
+   } elseif (isset($_POST['connect_file']) && isset($_FILES['data_file'])) {
+        $file = $_FILES['data_file'];
+        $allowed_exts = ['json', 'csv'];
+        $file_ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+
+        if (!in_array($file_ext, $allowed_exts)) {
+            $conn_error = "Upload Gagal: Format file tidak didukung! Harap unggah file .json atau .csv.";
+        } elseif ($file['error'] === UPLOAD_ERR_OK) {
+            // INI MAGIC-NYA: Kita ubah File JSON/CSV jadi Database SQLite Sementara!
+            $destSqlite = $tempDir . '/converted_' . time() . '_' . rand(1000,9999) . '.sqlite';
+            try {
+                $pdoTemp = new PDO("sqlite:" . $destSqlite);
+                $pdoTemp->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+
+                if ($file_ext === 'json') {
+                    $content = file_get_contents($file['tmp_name']);
+                    $json = json_decode($content, true);
+                    if (json_last_error() !== JSON_ERROR_NONE) {
+                        throw new Exception("File JSON tidak valid: " . json_last_error_msg());
+                    }
+                    
+                    // Deteksi struktur phpMyAdmin (banyak tabel)
+                    $isPhpMyAdmin = false;
+                    if (is_array($json)) {
+                        foreach ($json as $item) {
+                            if (is_array($item) && isset($item['type']) && $item['type'] === 'table') {
+                                $isPhpMyAdmin = true; break;
+                            }
+                        }
+                    }
+
+                    if ($isPhpMyAdmin) {
+                        foreach ($json as $item) {
+                            if (is_array($item) && isset($item['type']) && $item['type'] === 'table' && isset($item['name'])) {
+                                convertArrayToSQLite($pdoTemp, $item['name'], $item['data'] ?? []);
+                            }
+                        }
+                    } else {
+                        if (!is_array($json) || (array_keys($json) !== range(0, count($json) - 1))) {
+                            $json = [$json]; // Ubah objek jadi array 1 item
+                        }
+                        convertArrayToSQLite($pdoTemp, basename($file['name'], '.json'), $json);
+                    }
+                } else if ($file_ext === 'csv') {
+                    $data = [];
+                    if (($handle = fopen($file['tmp_name'], "r")) !== FALSE) {
+                        $header = fgetcsv($handle, 10000, ",");
+                        if ($header) {
+                            $header = array_map('trim', $header);
+                            while (($row = fgetcsv($handle, 10000, ",")) !== FALSE) {
+                                $tempRow = [];
+                                foreach ($header as $i => $col) {
+                                    $colName = $col !== '' ? $col : "Column_$i";
+                                    $tempRow[$colName] = $row[$i] ?? '';
+                                }
+                                $data[] = $tempRow;
+                            }
+                        }
+                        fclose($handle);
+                        convertArrayToSQLite($pdoTemp, basename($file['name'], '.csv'), $data);
+                    } else {
+                        throw new Exception("Gagal membaca file CSV.");
+                    }
+                }
+                
+                // Set sesi seolah-olah user mengupload SQLite! (Sehingga UI dapat Full Feature SQL)
+                $_SESSION['db_connection'] = ['driver' => 'sqlite', 'file' => $destSqlite, 'dbname' => basename($file['name']) . ' (Parsed)'];
+                header("Location: index.php"); exit;
+            } catch (Exception $e) {
+                $conn_error = "Konversi Gagal: " . $e->getMessage();
+                @unlink($destSqlite);
+            }
+        } else {
+            $conn_error = "Upload Gagal dengan Error Code {$file['error']}";
         }
     }
 }
@@ -158,13 +271,35 @@ if ($pdo === null):
                             }
                             document.getElementById('uploadIcon').className = 'fa-solid fa-circle-notch fa-spin text-5xl text-emerald-500 mb-4'; 
                             document.getElementById('fileName').innerText = 'Memuat Database...'; 
-                            document.getElementById('fileDesc').innerText = 'Mohon tunggu sebentar'; 
                             this.form.submit();
                         }
                     ">
                     <i id="uploadIcon" class="fa-solid fa-cloud-arrow-up text-5xl text-slate-500 group-hover:text-emerald-500 mb-4 transition-colors"></i>
                     <p class="text-base font-bold text-slate-300 group-hover:text-emerald-400" id="fileName">Klik atau Drop file SQLite ke sini</p>
                     <p class="text-sm text-slate-500 mt-2" id="fileDesc">Mendukung file format .sqlite, .sqlite3, .db</p>
+                </div>
+            </form>
+        </div>
+        <div class="flex-1 p-6 lg:p-10 border-t lg:border-t-0 lg:border-l border-slate-700 bg-slate-800/30 flex flex-col justify-center">
+            <h2 class="text-2xl font-bold text-amber-400 mb-2"><i class="fa-solid fa-file-csv mr-2"></i> JSON / CSV</h2>
+            <p class="text-sm text-slate-400 mb-6">Inspeksi data JSON/CSV dengan mode Super.</p>
+            <form method="POST" enctype="multipart/form-data" class="flex flex-col flex-1" id="fileForm">
+                <input type="hidden" name="connect_file" value="1">
+                <div class="flex-1 border-2 border-dashed border-slate-600 rounded-xl flex flex-col items-center justify-center p-8 text-center hover:border-amber-400 hover:bg-amber-400/5 transition-colors group cursor-pointer relative min-h-[250px]">
+                    <input type="file" name="data_file" accept=".json,.csv" required class="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" 
+                    onchange="
+                        const allowedExts = ['json', 'csv']; const file = this.files[0];
+                        if (file) {
+                            if (!allowedExts.includes(file.name.split('.').pop().toLowerCase())) {
+                                alert('Format ditolak! Hanya menerima .json atau .csv'); this.value = ''; return false;
+                            }
+                            document.getElementById('uploadIconFile').className = 'fa-solid fa-circle-notch fa-spin text-5xl text-amber-400 mb-4'; 
+                            document.getElementById('fileNameFile').innerText = 'Mengonversi Data...'; 
+                            this.form.submit();
+                        }
+                    ">
+                    <i id="uploadIconFile" class="fa-solid fa-file-code text-5xl text-slate-500 group-hover:text-amber-400 mb-4 transition-colors"></i>
+                    <p class="text-base font-bold text-slate-300 group-hover:text-amber-400" id="fileNameFile">Drop file JSON/CSV ke sini</p>
                 </div>
             </form>
         </div>
@@ -199,6 +334,8 @@ endif;
 // DASHBOARD UTAMA (SETELAH KONEKSI BERHASIL)
 // ==========================================
 $sessionConn = $_SESSION['db_connection'] ?? null;
+$driver = $sessionConn['driver'] ?? 'mysql';
+
 $dbManager = new DatabaseManager($pdo, $dbname, $driver);
 
 if (isset($_GET['action']) && $_GET['action'] === 'trace') {
@@ -239,7 +376,7 @@ if ($currentTable) {
         if ($joinedQuery === null) {
             $query = $dbManager->buildRawQuery($currentTable);
             $mode = 'raw';
-            $query_status = "no_relation"; // Tabel ini benar-benar tidak punya relasi
+            $query_status = "no_relation"; 
         } else {
             $query = $joinedQuery;
         }
@@ -378,7 +515,7 @@ if ($currentTable) {
                         </div>
                     </div>
                 </div>
-
+                
                 <div class="pt-2">
                     <label class="text-xs text-slate-400 block mb-3 uppercase font-bold tracking-wider"><i class="fa-solid fa-hard-drive mr-1"></i> Database Backup</label>
                     <a href="?action=sqlite_all" class="w-full py-3 px-4 bg-slate-700 hover:bg-slate-600 border border-slate-600 rounded-lg text-white font-medium flex items-center justify-center gap-2">
@@ -437,7 +574,7 @@ if ($currentTable) {
                 </div>
                 <div class="flex items-center justify-between">
                     <div class="flex items-center gap-2 text-sm text-slate-300 font-mono truncate bg-slate-900/50 p-1.5 rounded border border-slate-700 w-full">
-                        <i class="fa-solid <?= $driver === 'mysql' ? 'fa-server text-blue-400' : 'fa-file-code text-emerald-400' ?> ml-1"></i>
+                        <i class="fa-solid <?= $driver === 'sqlite' ? 'fa-file-code text-emerald-400' : 'fa-server text-blue-400' ?> ml-1"></i>
                         <span class="truncate ml-1" title="<?= htmlspecialchars($dbname) ?>"><?= htmlspecialchars($dbname) ?></span>
                         <a href="?action=disconnect" class="text-red-400 hover:text-red-300 ml-auto mr-1 p-1 bg-red-500/10 rounded transition-colors" title="Disconnect"><i class="fa-solid fa-power-off"></i></a>
                     </div>
@@ -500,6 +637,7 @@ if ($currentTable) {
                         </button>
                         <div class="absolute right-0 mt-2 w-56 md:w-64 bg-slate-800 border border-slate-700 rounded-lg shadow-2xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all p-2 flex flex-col gap-1 max-h-60 overflow-y-auto z-[100]" id="columnToggles"></div>
                     </div>
+                    
                     <a href="?action=sqlite&table=<?= urlencode($currentTable) ?>" class="px-3 md:px-4 py-1.5 md:py-2 bg-slate-800 border border-slate-600 hover-border-theme hover-bg-theme text-slate-200 rounded-lg text-xs md:text-sm font-medium transition-all flex items-center gap-2 shadow-sm shrink-0">
                         <i class="fa-solid fa-download"></i> <span class="hidden lg:inline">.sqlite</span>
                     </a>
@@ -524,7 +662,7 @@ if ($currentTable) {
                 <div class="bg-red-500/10 border border-red-500/50 text-red-400 p-4 rounded-xl flex items-start gap-3 shadow-lg">
                     <i class="fa-solid fa-triangle-exclamation text-xl mt-0.5"></i>
                     <div>
-                        <h4 class="font-bold text-sm">Query Terhenti (Database Error)</h4>
+                        <h4 class="font-bold text-sm">Error Pembacaan Data</h4>
                         <p class="text-xs mt-1 font-mono opacity-80"><?= htmlspecialchars($db_error) ?></p>
                     </div>
                 </div>
@@ -568,7 +706,7 @@ if ($currentTable) {
                                     foreach ($row as $cell): 
                                         $colName = $colKeys[$colIndex];
                                     ?>
-                                        <td class="cell-pad" onclick="startTrace('<?= htmlspecialchars($currentTable) ?>', '<?= htmlspecialchars($colName) ?>', '<?= htmlspecialchars($cell ?? '') ?>')">
+                                        <td class="cell-pad traceable" onclick="startTrace('<?= htmlspecialchars($currentTable) ?>', '<?= htmlspecialchars($colName) ?>', '<?= htmlspecialchars($cell ?? '') ?>')">
                                             <?= ($cell === null) ? '<span class="text-slate-600 italic">NULL</span>' : htmlspecialchars($cell) ?>
                                         </td>
                                     <?php $colIndex++; endforeach; ?>
@@ -630,7 +768,7 @@ if ($currentTable) {
             } else {
                 search.classList.add('hidden'); search.classList.remove('flex');
                 normal.classList.remove('hidden'); normal.classList.add('flex');
-                input.value = ''; executeSearch(''); // Reset filter
+                input.value = ''; executeSearch('');
             }
         }
 
@@ -638,15 +776,19 @@ if ($currentTable) {
             const fs = localStorage.getItem('voidDbFontSize') || '16';
             const dens = JSON.parse(localStorage.getItem('voidDbDensity')) || {py: '0.75rem', px: '1.25rem'};
             
-            ['font14', 'font16', 'font18'].forEach(id => { document.getElementById(id).className = 'flex-1 py-1.5 rounded-md text-xs font-bold transition-colors text-slate-400 hover:text-white'; });
-            document.getElementById('font' + fs).className = 'flex-1 py-1.5 rounded-md text-xs font-bold transition-colors bg-theme text-white shadow-sm';
+            ['font14', 'font16', 'font18'].forEach(id => { 
+                if(document.getElementById(id)) document.getElementById(id).className = 'flex-1 py-1.5 rounded-md text-xs font-bold transition-colors text-slate-400 hover:text-white'; 
+            });
+            if(document.getElementById('font' + fs)) document.getElementById('font' + fs).className = 'flex-1 py-1.5 rounded-md text-xs font-bold transition-colors bg-theme text-white shadow-sm';
 
-            ['denseTight', 'denseNormal', 'denseLoose'].forEach(id => { document.getElementById(id).className = 'flex-1 py-1.5 rounded-md text-xs font-bold transition-colors text-slate-400 hover:text-white'; });
+            ['denseTight', 'denseNormal', 'denseLoose'].forEach(id => { 
+                if(document.getElementById(id)) document.getElementById(id).className = 'flex-1 py-1.5 rounded-md text-xs font-bold transition-colors text-slate-400 hover:text-white'; 
+            });
             
             let densId = 'denseNormal';
             if (dens.py === '0.35rem') densId = 'denseTight';
             else if (dens.py === '1.25rem') densId = 'denseLoose';
-            document.getElementById(densId).className = 'flex-1 py-1.5 rounded-md text-xs font-bold transition-colors bg-theme text-white shadow-sm';
+            if(document.getElementById(densId)) document.getElementById(densId).className = 'flex-1 py-1.5 rounded-md text-xs font-bold transition-colors bg-theme text-white shadow-sm';
         }
 
         function setA11y(type, val) {

@@ -21,7 +21,7 @@ class DatabaseManager {
 
     public function getPrimaryKey($table) {
         if ($this->driver === 'sqlite') {
-            $cols = $this->pdo->query("PRAGMA table_info('$table')")->fetchAll(PDO::FETCH_ASSOC);
+            $cols = $this->pdo->query('PRAGMA table_info("' . $table . '")')->fetchAll(PDO::FETCH_ASSOC);
             foreach($cols as $c) { if($c['pk'] > 0) return $c['name']; }
             return null;
         }
@@ -34,12 +34,12 @@ class DatabaseManager {
     public function getRelations() {
         $relations = [];
 
-        // 1. Ambil Relasi Resmi (Jika ada)
+        // 1. Ambil Relasi Resmi
         if ($this->driver === 'sqlite') {
             $tables = $this->getTables();
             foreach ($tables as $t) {
                 try {
-                    $stmt = $this->pdo->query("PRAGMA foreign_key_list('$t')");
+                    $stmt = $this->pdo->query('PRAGMA foreign_key_list("' . $t . '")');
                     if ($stmt) {
                         $fks = $stmt->fetchAll(PDO::FETCH_ASSOC);
                         foreach ($fks as $fk) {
@@ -63,7 +63,7 @@ class DatabaseManager {
             $relations = $stmt->fetchAll(PDO::FETCH_ASSOC);
         }
 
-        // 2. SMART MAPPING V2 (Super Agresif untuk SQLite)
+        // 2. SMART MAPPING V5 (Ultimate Token-Based Matcher)
         $allTables = $this->getTables();
         foreach ($allTables as $sourceTable) {
             $cols = $this->getTableColumns($sourceTable);
@@ -75,6 +75,7 @@ class DatabaseManager {
                 $prefix = "";
                 $colLower = strtolower($col);
 
+                // Pola: target_item_id, class_no, dll.
                 if (preg_match('/^(.+?)[_-]?(id|no|code)$/i', $col, $matches)) {
                     $prefix = strtolower($matches[1]);
                 } else {
@@ -82,15 +83,30 @@ class DatabaseManager {
                 }
 
                 if ($prefix !== "") {
+                    // Pecah prefix jadi kata-kata (misal: 'target_item' -> ['target', 'item'])
+                    $prefixWords = explode('_', $prefix);
+
                     foreach ($allTables as $targetTable) {
                         if (strcasecmp($targetTable, $sourceTable) === 0) continue; 
                         
                         $targetLower = strtolower($targetTable);
-                        if ($targetLower === $prefix || 
-                            $targetLower === $prefix . "s" || 
-                            $targetLower === $prefix . "es" ||
-                            $prefix === $targetLower . "s") 
-                        {
+                        $isMatch = false;
+
+                        // Cek kecocokan nama persis (class == class / classes)
+                        if ($targetLower === $prefix || $targetLower === $prefix . "s" || $targetLower === $prefix . "es" || $prefix === $targetLower . "s") {
+                            $isMatch = true;
+                        } else {
+                            // Cek kecocokan berbasis token (Apakah kata 'item' ada di dalam tabel 'item')
+                            foreach ($prefixWords as $pWord) {
+                                if (strlen($pWord) > 2) { // Minimal 3 huruf agar tidak salah menebak
+                                    if ($pWord === $targetLower || $pWord . "s" === $targetLower || $pWord === $targetLower . "s") {
+                                        $isMatch = true; break;
+                                    }
+                                }
+                            }
+                        }
+
+                        if ($isMatch) {
                             $exists = false;
                             foreach ($relations as $rel) {
                                 if (strcasecmp($rel['TABLE_NAME'], $sourceTable) === 0 && strcasecmp($rel['COLUMN_NAME'], $col) === 0) {
@@ -100,6 +116,24 @@ class DatabaseManager {
 
                             if (!$exists) {
                                 $targetPk = $this->getPrimaryKey($targetTable);
+                                
+                                // Penebak PK Lapis 4 (Super Cerdas)
+                                if (!$targetPk) {
+                                    $targetCols = $this->getTableColumns($targetTable);
+                                    
+                                    // Lapis 1: Sama persis
+                                    foreach ($targetCols as $tc) { if (strcasecmp($tc, $col) === 0) { $targetPk = $tc; break; } }
+                                    
+                                    // Lapis 2: Tabel target + _id (item -> item_id)
+                                    if (!$targetPk) { foreach ($targetCols as $tc) { if (strcasecmp($tc, $targetTable . '_id') === 0) { $targetPk = $tc; break; } } }
+                                    
+                                    // Lapis 3: Cuma 'id'
+                                    if (!$targetPk) { foreach ($targetCols as $tc) { if (strcasecmp($tc, 'id') === 0) { $targetPk = $tc; break; } } }
+                                    
+                                    // Lapis 4: Pokoknya yang berakhiran _id
+                                    if (!$targetPk) { foreach ($targetCols as $tc) { if (preg_match('/_id$/i', $tc)) { $targetPk = $tc; break; } } }
+                                }
+
                                 $relations[] = [
                                     'TABLE_NAME' => $sourceTable,
                                     'COLUMN_NAME' => $col,
@@ -118,7 +152,7 @@ class DatabaseManager {
 
     public function getTableColumns($table) {
         if ($this->driver === 'sqlite') {
-            $cols = $this->pdo->query("PRAGMA table_info('$table')")->fetchAll(PDO::FETCH_ASSOC);
+            $cols = $this->pdo->query('PRAGMA table_info("' . $table . '")')->fetchAll(PDO::FETCH_ASSOC);
             return array_map(function($c) { return $c['name']; }, $cols);
         }
         return $this->pdo->query("SHOW COLUMNS FROM `$table`")->fetchAll(PDO::FETCH_COLUMN);
@@ -126,7 +160,7 @@ class DatabaseManager {
 
     private function getTableColumnsWithType($table) {
         if ($this->driver === 'sqlite') {
-            $cols = $this->pdo->query("PRAGMA table_info('$table')")->fetchAll(PDO::FETCH_ASSOC);
+            $cols = $this->pdo->query('PRAGMA table_info("' . $table . '")')->fetchAll(PDO::FETCH_ASSOC);
             return array_map(function($c) { return ['Field' => $c['name'], 'Type' => $c['type']]; }, $cols);
         }
         return $this->pdo->query("SHOW COLUMNS FROM `$table`")->fetchAll(PDO::FETCH_ASSOC);
@@ -191,7 +225,6 @@ class DatabaseManager {
         if ($mode === 'join') {
             $joinQuery = $this->buildJoinQuery($targetTable, $relations);
             if ($joinQuery !== null) {
-                // Limit dinaikkan agar lebih banyak baris yang terlihat di Deep Inspector
                 $sql = str_replace("LIMIT 500", "WHERE `$targetTable`.`$whereCol` = :val LIMIT 250", $joinQuery);
             } else {
                 $sql = "SELECT * FROM `$targetTable` WHERE `$whereCol` = :val LIMIT 250";
@@ -205,7 +238,6 @@ class DatabaseManager {
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
-    // FUNGSI BARU: Menarik relasi dari BANYAK id sekaligus (Agregasi)
     private function fetchTracedDataMultiple($targetTable, $whereCol, $whereVals, $mode, $relations) {
         if (empty($whereVals)) return [];
         $inQuery = implode(',', array_fill(0, count($whereVals), '?'));
@@ -231,7 +263,6 @@ class DatabaseManager {
         $actualCols = $this->getTableColumns($table);
 
         if (in_array($column, $actualCols)) {
-            // Ambil semua baris yang cocok dengan yang diklik (hingga 250 baris)
             $stmtSource = $this->pdo->prepare("SELECT * FROM `$table` WHERE `$column` = :val LIMIT 250");
             $stmtSource->execute(['val' => $value]);
             $sourceRows = $stmtSource->fetchAll(PDO::FETCH_ASSOC);
@@ -242,18 +273,14 @@ class DatabaseManager {
 
                 $pkCol = $this->getPrimaryKey($table) ?: '';
                 
-                // 1. Kumpulkan semua nilai Primary Key dari baris yang ditemukan
                 $pkValues = [];
                 if ($pkCol !== '') {
                     foreach ($sourceRows as $r) {
-                        if (isset($r[$pkCol]) && $r[$pkCol] !== null) {
-                            $pkValues[] = $r[$pkCol];
-                        }
+                        if (isset($r[$pkCol]) && $r[$pkCol] !== null) $pkValues[] = $r[$pkCol];
                     }
                     $pkValues = array_unique($pkValues);
                 }
 
-                // 2. Child Relations (Agregasi)
                 if (!empty($pkValues)) {
                     foreach ($relations as $rel) {
                         if (strcasecmp($rel['REFERENCED_TABLE_NAME'], $table) === 0 && strcasecmp($rel['REFERENCED_COLUMN_NAME'], $pkCol) === 0) {
@@ -266,19 +293,15 @@ class DatabaseManager {
                     }
                 }
 
-                // 3. Parent Relations (Agregasi)
                 foreach ($relations as $rel) {
                     if (strcasecmp($rel['TABLE_NAME'], $table) === 0) {
                         $pTable = $rel['REFERENCED_TABLE_NAME']; 
                         $pCol = $rel['REFERENCED_COLUMN_NAME']; 
                         $fkCol = $rel['COLUMN_NAME'];
                         
-                        // Kumpulkan semua nilai Foreign Key
                         $fkValues = [];
                         foreach ($sourceRows as $r) {
-                            if (isset($r[$fkCol]) && $r[$fkCol] !== null) {
-                                $fkValues[] = $r[$fkCol];
-                            }
+                            if (isset($r[$fkCol]) && $r[$fkCol] !== null) $fkValues[] = $r[$fkCol];
                         }
                         $fkValues = array_unique($fkValues);
                         
@@ -292,7 +315,6 @@ class DatabaseManager {
             }
         }
 
-        // Child By Value (tetap sama)
         foreach ($relations as $rel) {
             if (strcasecmp($rel['REFERENCED_TABLE_NAME'], $table) === 0 && strcasecmp($rel['REFERENCED_COLUMN_NAME'], $column) === 0) {
                 if ($data = $this->fetchTracedData($rel['TABLE_NAME'], $rel['COLUMN_NAME'], $value, $mode, $relations)) {
@@ -375,5 +397,6 @@ class DatabaseManager {
         }
         return $dbFile;
     }
+    
 }
 ?>
