@@ -410,6 +410,32 @@ if (!$primaryKeyColPHP && !empty($nativeCols)) {
     $primaryKeyColPHP = in_array('id', $nativeCols) ? 'id' : $nativeCols[0];
 }
 
+// --- API RAW SQL EXECUTION ---
+if (isset($_GET['action']) && $_GET['action'] === 'run_sql') {
+    if (ob_get_length())
+        ob_clean();
+    header('Content-Type: application/json');
+    try {
+        $sql = trim($_POST['query'] ?? '');
+        if (empty($sql))
+            throw new Exception("Query SQL tidak boleh kosong.");
+
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute();
+
+        // Cek apakah perintahnya mengembalikan data (SELECT, SHOW, PRAGMA)
+        if (preg_match('/^\s*(SELECT|PRAGMA|SHOW|DESCRIBE|EXPLAIN)\b/i', $sql)) {
+            $data = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            echo json_encode(['success' => true, 'type' => 'select', 'data' => $data]);
+        } else {
+            echo json_encode(['success' => true, 'type' => 'execute', 'affected' => $stmt->rowCount()]);
+        }
+    } catch (Exception $e) {
+        echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+    }
+    exit;
+}
+
 if (isset($_GET['action']) && $_GET['action'] === 'crud') {
     if (ob_get_length())
         ob_clean();
@@ -696,7 +722,6 @@ if ($currentTable) {
         }
 
         /* --- STATE 1: READONLY (DEFAULT) --- */
-        /* Text bisa diblok. Cursor biasa. Gak ada tooltip */
         body:not(.mode-inspect):not(.mode-editor) td.properties-trigger {
             cursor: text;
         }
@@ -798,7 +823,6 @@ if ($currentTable) {
         document.documentElement.style.setProperty('--cell-py', savedDensity.py);
         document.documentElement.style.setProperty('--cell-px', savedDensity.px);
 
-        // Preload Class untuk mencegah blink
         let preMode = localStorage.getItem('voidDbAppMode') || 'readonly';
         if (localStorage.getItem('voidDbEditorMode') === 'on') { preMode = 'editor'; localStorage.removeItem('voidDbEditorMode'); localStorage.setItem('voidDbAppMode', 'editor'); }
         if (preMode === 'inspect') document.documentElement.classList.add('mode-inspect-preload');
@@ -807,6 +831,10 @@ if ($currentTable) {
 </head>
 
 <body class="flex h-screen overflow-hidden antialiased selection:bg-theme selection:text-white">
+
+    <script>
+        const currentTableData = <?= json_encode($rows, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE) ?>;
+    </script>
 
     <div id="settingsModal"
         class="fixed inset-0 z-[120] hidden items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm transition-opacity">
@@ -911,6 +939,41 @@ if ($currentTable) {
         </div>
     </div>
 
+    <div id="sqlModal"
+        class="fixed inset-0 z-[140] hidden items-center justify-center bg-slate-900/90 backdrop-blur-md p-2 md:p-4">
+        <div class="bg-[#1e293b] border border-slate-600 w-full h-full md:h-auto md:max-h-[90vh] md:max-w-5xl rounded-2xl shadow-2xl flex flex-col overflow-hidden transform scale-95 transition-transform duration-200"
+            id="sqlModalContent">
+            <div class="p-4 border-b border-slate-700 bg-slate-800 flex justify-between items-center shrink-0">
+                <h3 class="text-lg font-bold text-white flex items-center gap-2">
+                    <i class="fa-solid fa-terminal text-indigo-400"></i> Global SQL Console
+                </h3>
+                <button onclick="closeSqlModal()" class="text-slate-400 hover:text-red-400 p-1"><i
+                        class="fa-solid fa-xmark fa-lg"></i></button>
+            </div>
+            <div class="flex-1 flex flex-col min-h-0 bg-[#0f172a]">
+                <div class="p-4 shrink-0 bg-slate-900 border-b border-slate-700 flex flex-col gap-3">
+                    <textarea id="sqlQueryInput" rows="4" spellcheck="false"
+                        class="w-full bg-[#0f172a] text-emerald-400 font-mono text-sm md:text-base p-4 rounded-xl border border-slate-700 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none resize-none shadow-inner"
+                        placeholder="Ketik perintah SQL di sini... (Contoh: SELECT * FROM `table_name`)"></textarea>
+                    <div class="flex justify-between items-center">
+                        <span class="text-slate-500 text-xs font-mono"><i class="fa-solid fa-keyboard"></i> Tekan Ctrl +
+                            Enter untuk Eksekusi</span>
+                        <button onclick="runSql()"
+                            class="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm rounded-lg shadow-lg flex items-center gap-2 transition-colors">
+                            <i class="fa-solid fa-play"></i> Jalankan Query
+                        </button>
+                    </div>
+                </div>
+                <div id="sqlResultContainer" class="flex-1 overflow-auto p-4 properties-scroll relative">
+                    <div class="flex flex-col items-center justify-center h-full text-slate-500 opacity-50">
+                        <i class="fa-solid fa-bolt text-5xl mb-4 text-indigo-500"></i>
+                        <p class="text-sm font-medium">Hasil query akan ditampilkan di sini.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div id="disconnectModal"
         class="fixed inset-0 z-[200] hidden items-center justify-center bg-slate-900/90 backdrop-blur-sm p-4">
         <div class="bg-[#1e293b] border border-slate-600 rounded-2xl max-w-sm w-full p-6 shadow-2xl flex flex-col items-center text-center transform transition-transform duration-300 scale-95"
@@ -937,6 +1000,10 @@ if ($currentTable) {
                 </button>
             </div>
         </div>
+    </div>
+
+    <div id="toastContainer"
+        class="fixed bottom-4 md:bottom-10 left-1/2 -translate-x-1/2 z-[300] flex flex-col gap-2 pointer-events-none">
     </div>
 
     <aside id="appSidebar"
@@ -977,16 +1044,27 @@ if ($currentTable) {
                     </div>
                 </div>
             </div>
+
+            <div class="px-5 mt-2 pb-4 hide-on-collapse border-b border-slate-700/50">
+                <button onclick="openSqlModal('')"
+                    class="w-full py-2 bg-indigo-600/10 hover:bg-indigo-600/20 border border-indigo-500/30 text-indigo-400 rounded-lg flex items-center justify-center gap-2 text-xs font-bold transition-colors">
+                    <i class="fa-solid fa-terminal"></i> Global SQL Console
+                </button>
+            </div>
+
             <div class="hidden flex-col items-center gap-4 py-6 show-on-collapse">
                 <button onclick="toggleSettings()"
                     class="text-slate-400 hover:text-theme transition-colors p-2 rounded-lg hover:bg-slate-800"
                     title="Settings"><i class="fa-solid fa-gear fa-xl"></i></button>
+                <button onclick="openSqlModal('')"
+                    class="text-indigo-400 hover:text-indigo-300 transition-colors p-2 rounded-lg hover:bg-indigo-900/30 mt-2"
+                    title="SQL Console"><i class="fa-solid fa-terminal fa-xl"></i></button>
                 <button onclick="showDisconnectModal()"
                     class="text-red-400 hover:text-red-300 transition-colors p-2 rounded-lg hover:bg-red-900/30 mt-2"
                     title="Disconnect"><i class="fa-solid fa-power-off fa-xl"></i></button>
             </div>
         </div>
-        <div class="px-5 mt-auto pt-6 border-t border-slate-700 space-y-3 mb-4">
+        <div class="px-5 mt-auto pt-6 border-t border-slate-700 space-y-3 mb-4 order-last">
             <p class="text-[10px] text-slate-500 uppercase font-bold tracking-widest mb-2 flex items-center gap-1.5">
                 <i class="fa-solid fa-download"></i> Ekspor & Backup
             </p>
@@ -1042,15 +1120,39 @@ if ($currentTable) {
                 </div>
 
                 <button onclick="toggleMobileSearch(true)"
-                    class="md:hidden text-slate-400 hover:text-theme p-2.5 rounded-lg bg-slate-800 border border-slate-700 shrink-0 shadow-sm transition-colors">
+                    class="md:hidden text-slate-400 hover:text-theme p-2.5 rounded-lg bg-slate-800 border border-slate-700 shrink-0 shadow-sm transition-colors ml-auto mr-2">
                     <i class="fa-solid fa-magnifying-glass"></i>
                 </button>
 
                 <div class="hidden md:flex items-center gap-2 md:gap-3 shrink-0 ml-auto">
+                    <button onclick="openSqlModal('SELECT * FROM `<?= htmlspecialchars($currentTable) ?>` LIMIT 50')"
+                        class="hidden lg:flex px-3 py-1.5 md:py-2 bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-400 border border-indigo-500/50 rounded-lg text-xs md:text-sm font-bold transition-colors items-center gap-2 shadow-sm shrink-0 mr-2">
+                        <i class="fa-solid fa-terminal"></i> <span class="hidden xl:inline">SQL Console</span>
+                    </button>
+
                     <button id="btnAddRecordDesk" onclick="openPropertiesModal(null, null, null)"
                         class="hidden px-3 py-1.5 md:py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs md:text-sm font-medium transition-all shadow-sm items-center gap-2 shrink-0 border border-emerald-500/50 mr-2">
                         <i class="fa-solid fa-plus"></i> <span class="hidden xl:inline">Data Baru</span>
                     </button>
+
+                    <div class="relative group shrink-0 mr-2">
+                        <button
+                            class="px-3 md:px-4 py-1.5 md:py-2 bg-slate-800 border border-slate-600 hover:border-slate-500 rounded-lg text-xs md:text-sm font-bold transition-colors flex items-center gap-2 text-slate-200 shadow-sm">
+                            <i class="fa-solid fa-copy text-slate-400"></i> <span class="hidden xl:inline">Salin</span>
+                        </button>
+                        <div
+                            class="absolute right-0 mt-2 w-32 bg-slate-800 border border-slate-700 rounded-lg shadow-2xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all p-1.5 flex flex-col z-[100] gap-1">
+                            <button onclick="copyData('json')"
+                                class="text-left px-3 py-2 hover:bg-slate-700 font-bold text-xs text-slate-300 rounded transition-colors"><i
+                                    class="fa-solid fa-code text-theme w-5"></i> JSON</button>
+                            <button onclick="copyData('csv')"
+                                class="text-left px-3 py-2 hover:bg-slate-700 font-bold text-xs text-slate-300 rounded transition-colors"><i
+                                    class="fa-solid fa-file-csv text-amber-400 w-5"></i> CSV</button>
+                            <button onclick="copyData('excel')"
+                                class="text-left px-3 py-2 hover:bg-slate-700 font-bold text-xs text-slate-300 rounded transition-colors"><i
+                                    class="fa-solid fa-file-excel text-emerald-400 w-5"></i> Excel / TSV</button>
+                        </div>
+                    </div>
 
                     <button id="btnToggleModeDesk" onclick="cycleAppMode()"
                         class="px-4 py-1.5 md:py-2 bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-lg text-xs md:text-sm font-bold transition-colors flex items-center gap-2 shadow-sm shrink-0 mr-2 text-slate-400">
@@ -1208,6 +1310,7 @@ if ($currentTable) {
                             Only</span>
                     </button>
                 </div>
+
                 <div id="containerAddRecordMob" class="hidden">
                     <label class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3 block"><i
                             class="fa-solid fa-plus mr-1"></i> Tambah Data Baru</label>
@@ -1216,6 +1319,33 @@ if ($currentTable) {
                         <i class="fa-solid fa-plus"></i> Form Tambah Data
                     </button>
                 </div>
+
+                <div>
+                    <label class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3 block"><i
+                            class="fa-solid fa-copy mr-1"></i> Salin / Ekspor Data Cepat</label>
+                    <div class="flex gap-2">
+                        <button onclick="copyData('json'); toggleMobileTools(false);"
+                            class="flex-1 py-2.5 bg-slate-800 border border-slate-600 hover:border-slate-500 rounded-lg text-xs font-bold text-slate-300 transition-colors"><i
+                                class="fa-solid fa-code text-theme mb-1 block text-lg"></i> JSON</button>
+                        <button onclick="copyData('csv'); toggleMobileTools(false);"
+                            class="flex-1 py-2.5 bg-slate-800 border border-slate-600 hover:border-slate-500 rounded-lg text-xs font-bold text-slate-300 transition-colors"><i
+                                class="fa-solid fa-file-csv text-amber-400 mb-1 block text-lg"></i> CSV</button>
+                        <button onclick="copyData('excel'); toggleMobileTools(false);"
+                            class="flex-1 py-2.5 bg-slate-800 border border-slate-600 hover:border-slate-500 rounded-lg text-xs font-bold text-slate-300 transition-colors"><i
+                                class="fa-solid fa-file-excel text-emerald-400 mb-1 block text-lg"></i> Excel</button>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3 block mt-4"><i
+                            class="fa-solid fa-terminal mr-1"></i> Terminal SQL (Run Query)</label>
+                    <button
+                        onclick="openSqlModal('SELECT * FROM `<?= htmlspecialchars($currentTable) ?>` LIMIT 50'); toggleMobileTools(false);"
+                        class="w-full py-3 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-400 border border-indigo-500/50 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2 shadow-sm">
+                        <i class="fa-solid fa-play"></i> Buka Terminal SQL
+                    </button>
+                </div>
+
                 <div>
                     <label class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3 block"><i
                             class="fa-solid fa-eye mr-1"></i> Mode Tampilan Data</label>
@@ -1365,10 +1495,7 @@ if ($currentTable) {
 
     <script>
         // --- 0. STATE 3-MODE (GLOBAL) ---
-        // readonly -> inspect -> editor -> readonly
         let currentAppMode = localStorage.getItem('voidDbAppMode') || 'readonly';
-
-        // Backward compatibility migration
         if (localStorage.getItem('voidDbEditorMode') === 'on') {
             currentAppMode = 'editor';
             localStorage.removeItem('voidDbEditorMode');
@@ -1397,6 +1524,152 @@ if ($currentTable) {
             }
         });
 
+        // --- FITUR BARU: NOTIFIKASI TOAST AMAN ---
+        function showToast(message, type = 'success') {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            const icon = type === 'success' ? '<i class="fa-solid fa-circle-check text-emerald-400"></i>' : '<i class="fa-solid fa-circle-exclamation text-red-400"></i>';
+            toast.className = `px-4 py-3 bg-slate-800/90 backdrop-blur border ${type === 'success' ? 'border-emerald-500/50' : 'border-red-500/50'} text-white rounded-lg shadow-2xl text-sm flex items-center gap-3 transition-all duration-300 transform translate-y-10 opacity-0 pointer-events-auto`;
+            toast.innerHTML = `${icon} <span class="font-medium">${message}</span>`;
+            container.appendChild(toast);
+
+            requestAnimationFrame(() => {
+                toast.classList.remove('translate-y-10', 'opacity-0');
+                toast.classList.add('translate-y-0', 'opacity-100');
+            });
+
+            setTimeout(() => {
+                toast.classList.remove('translate-y-0', 'opacity-100');
+                toast.classList.add('translate-y-10', 'opacity-0');
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
+        // --- FITUR BARU: COPY DATA (JSON, CSV, EXCEL) ---
+        function copyData(format) {
+            if (!currentTableData || currentTableData.length === 0) {
+                showToast("Tidak ada data untuk disalin.", "error");
+                return;
+            }
+
+            let text = "";
+            if (format === 'json') {
+                text = JSON.stringify(currentTableData, null, 2);
+            } else if (format === 'csv') {
+                const keys = Object.keys(currentTableData[0]);
+                text += keys.map(k => `"${String(k).replace(/"/g, '""')}"`).join(",") + "\n";
+                currentTableData.forEach(row => {
+                    text += keys.map(k => {
+                        let val = row[k] === null ? "" : String(row[k]);
+                        return `"${val.replace(/"/g, '""')}"`;
+                    }).join(",") + "\n";
+                });
+            } else if (format === 'excel') {
+                // Gunakan format TSV (Tab Separated Values) agar kompatibel dengan paste ke Grid Excel
+                const keys = Object.keys(currentTableData[0]);
+                text += keys.join("\t") + "\n";
+                currentTableData.forEach(row => {
+                    text += keys.map(k => {
+                        let val = row[k] === null ? "" : String(row[k]);
+                        return val.replace(/\t/g, " ").replace(/\n/g, " "); // Hapus newline agar grid tidak rusak
+                    }).join("\t") + "\n";
+                });
+            }
+
+            navigator.clipboard.writeText(text).then(() => {
+                showToast(`Tabel berhasil disalin sebagai ${format.toUpperCase()}!`, "success");
+            }).catch(err => {
+                showToast("Browser memblokir penyalinan data.", "error");
+            });
+        }
+
+        // --- FITUR BARU: SQL TERMINAL CONSOLE ---
+        function openSqlModal(defaultQuery = '') {
+            const modal = document.getElementById('sqlModal');
+            const content = document.getElementById('sqlModalContent');
+            const input = document.getElementById('sqlQueryInput');
+
+            if (defaultQuery) input.value = defaultQuery;
+
+            modal.classList.remove('hidden'); modal.classList.add('flex');
+            setTimeout(() => {
+                content.classList.remove('scale-95');
+                input.focus();
+            }, 10);
+        }
+
+        function closeSqlModal() {
+            const modal = document.getElementById('sqlModal');
+            const content = document.getElementById('sqlModalContent');
+            content.classList.add('scale-95');
+            setTimeout(() => {
+                modal.classList.add('hidden'); modal.classList.remove('flex');
+            }, 200);
+        }
+
+        document.getElementById('sqlQueryInput')?.addEventListener('keydown', function (e) {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') runSql();
+        });
+
+        async function runSql() {
+            const query = document.getElementById('sqlQueryInput').value;
+            const container = document.getElementById('sqlResultContainer');
+            if (!query.trim()) {
+                showToast("Query tidak boleh kosong!", "error");
+                return;
+            }
+
+            container.innerHTML = '<div class="flex justify-center mt-10"><i class="fa-solid fa-circle-notch fa-spin text-4xl text-indigo-500"></i></div>';
+
+            try {
+                const formData = new FormData();
+                formData.append('query', query);
+                const res = await fetch('?action=run_sql', { method: 'POST', body: formData });
+                const data = await res.json();
+
+                if (!data.success) {
+                    container.innerHTML = `<div class="bg-red-500/10 border border-red-500 text-red-400 p-4 rounded-xl font-mono text-sm"><b>Error Eksekusi:</b><br/>${escapeHTML(data.message)}</div>`;
+                    return;
+                }
+
+                if (data.type === 'select') {
+                    if (data.data.length === 0) {
+                        container.innerHTML = '<div class="text-slate-500 text-center mt-10"><i class="fa-solid fa-check text-4xl mb-3 opacity-50 text-emerald-400"></i><p>Query berhasil dieksekusi (0 baris ditemukan).</p></div>';
+                        return;
+                    }
+                    const keys = Object.keys(data.data[0]);
+                    let html = '<table class="w-full text-left border-collapse whitespace-nowrap text-sm"><thead class="bg-[#0f172a] text-slate-300"><tr>';
+                    keys.forEach(k => html += `<th class="border-b border-slate-700 px-4 py-2 font-bold">${escapeHTML(k)}</th>`);
+                    html += '</tr></thead><tbody class="divide-y divide-slate-800 font-mono">';
+                    data.data.forEach(row => {
+                        html += '<tr class="hover:bg-slate-800/50 transition-colors">';
+                        keys.forEach(k => {
+                            let v = row[k];
+                            html += `<td class="px-4 py-2 text-slate-300">${v !== null ? escapeHTML(v) : '<span class="text-slate-600 italic">NULL</span>'}</td>`;
+                        });
+                        html += '</tr>';
+                    });
+                    html += '</tbody></table>';
+                    container.innerHTML = html;
+                } else {
+                    container.innerHTML = `
+                    <div class="flex items-center justify-center h-full">
+                        <div class="bg-emerald-500/10 border border-emerald-500/50 text-emerald-400 p-6 rounded-xl flex flex-col items-center text-center gap-3 w-max max-w-sm">
+                            <i class="fa-solid fa-circle-check text-5xl"></i>
+                            <div>
+                                <h4 class="font-bold text-lg text-emerald-300">Query Berhasil</h4>
+                                <p class="text-sm mt-1">Baris yang terpengaruh (Affected Rows): <b>${data.affected}</b></p>
+                            </div>
+                        </div>
+                    </div>`;
+                }
+            } catch (err) {
+                container.innerHTML = `<div class="bg-red-500/10 border border-red-500 text-red-400 p-4 rounded-xl font-mono text-sm">Kesalahan Sistem: ${err.message}</div>`;
+            }
+        }
+
+
+        // --- MODE CONTROLLER ---
         function cycleAppMode() {
             if (currentAppMode === 'readonly') currentAppMode = 'inspect';
             else if (currentAppMode === 'inspect') currentAppMode = 'editor';
@@ -1407,7 +1680,6 @@ if ($currentTable) {
         }
 
         function applyAppModeState() {
-            // UI Elements
             const btnDesk = document.getElementById('btnToggleModeDesk');
             const iconDesk = document.getElementById('iconModeDesk');
             const textDesk = document.getElementById('textModeDesk');
@@ -1421,7 +1693,6 @@ if ($currentTable) {
 
             const badgeStatus = document.getElementById('editorStatusBadge');
 
-            // Setup Desktop Button
             if (btnDesk) {
                 btnDesk.className = "px-4 py-1.5 md:py-2 border rounded-lg text-xs md:text-sm font-bold transition-colors flex items-center gap-2 shadow-sm shrink-0 mr-2";
                 if (currentAppMode === 'readonly') {
@@ -1439,7 +1710,6 @@ if ($currentTable) {
                 }
             }
 
-            // Setup Mobile Sheet Button
             if (btnMob) {
                 btnMob.className = "w-full py-3 border rounded-lg text-sm font-bold transition-colors flex items-center justify-center gap-2 shadow-sm";
                 if (currentAppMode === 'readonly') {
@@ -1457,7 +1727,6 @@ if ($currentTable) {
                 }
             }
 
-            // Setup Modal Badge (Inside Properties)
             if (badgeStatus) {
                 badgeStatus.className = "text-[10px] px-2.5 py-1 rounded border font-bold tracking-widest uppercase transition-colors flex items-center gap-1.5 shadow-sm";
                 if (currentAppMode === 'readonly') {
@@ -1472,13 +1741,11 @@ if ($currentTable) {
                 }
             }
 
-            // Body Classes for Tooltips
             document.body.classList.remove('mode-inspect', 'mode-editor');
             document.documentElement.classList.remove('mode-inspect-preload', 'mode-editor-preload');
             if (currentAppMode === 'inspect') document.body.classList.add('mode-inspect');
             if (currentAppMode === 'editor') document.body.classList.add('mode-editor');
 
-            // Refresh Properties Pane if open
             const propModal = document.getElementById('propertiesModal');
             if (propModal && !propModal.classList.contains('hidden')) {
                 updateEditorPane(currentEditTable, currentEditRowData);
@@ -1498,13 +1765,11 @@ if ($currentTable) {
         };
 
         function handleCellClick(td, clickedColName) {
-            // MENGIZINKAN TEXT SELECTION AMAN TANPA MEMBUKA MODAL!
             if (currentAppMode === 'readonly') return;
 
             const tr = td.closest('tr');
             if (!tr.dataset.row) return;
 
-            // PENGGUNAAN BASE64 -> 100% AMAN DARI QUOTE HELL
             const rowData = JSON.parse(decodeURIComponent(atob(tr.dataset.row)));
             openPropertiesModal(clickedColName, rowData[clickedColName], rowData, activeTable);
         }
@@ -1662,8 +1927,8 @@ if ($currentTable) {
 
                 const res = await fetch('?action=crud', { method: 'POST', body: reqData });
                 const result = await res.json();
-                if (result.success) location.reload(); else alert('Gagal menyimpan: ' + result.message);
-            } catch (err) { alert('Error sistem: ' + err.message); }
+                if (result.success) location.reload(); else showToast('Gagal menyimpan: ' + result.message, "error");
+            } catch (err) { showToast('Error sistem: ' + err.message, "error"); }
         }
 
         async function deleteEditorRecord(pkVal) {
@@ -1673,8 +1938,8 @@ if ($currentTable) {
                 reqData.append('operation', 'delete'); reqData.append('table', currentEditTable); reqData.append('pkVal', pkVal);
                 const res = await fetch('?action=crud', { method: 'POST', body: reqData });
                 const result = await res.json();
-                if (result.success) location.reload(); else alert('Gagal menghapus: ' + result.message);
-            } catch (err) { alert('Error sistem: ' + err.message); }
+                if (result.success) location.reload(); else showToast('Gagal menghapus: ' + result.message, "error");
+            } catch (err) { showToast('Error sistem: ' + err.message, "error"); }
         }
 
         // --- 2. DEEP INSPECTOR LOGIC ---
